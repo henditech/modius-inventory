@@ -30,10 +30,17 @@ export default function ProduksiPage() {
 
   useEffect(() => {
     async function loadProducts() {
+      // Hanya tampilkan produk yang stoknya fisik nyata (polos & bordir).
+      // Produk tipe "tempel" (topi polos + pin dirakit saat packing) sengaja
+      // disembunyikan di sini karena tidak diproduksi langsung — stoknya
+      // otomatis mengikuti stok topi polos + pin, bukan diinput manual.
       const { data } = await supabase
         .from("products")
-        .select("id, full_name, photo_url, stock(available_qty)")
-        .eq("is_active", true);
+        .select(
+          "id, full_name, photo_url, stock(available_qty), logos!inner(type)",
+        )
+        .eq("is_active", true)
+        .in("logos.type", ["polos", "bordir"]);
 
       if (data) {
         const mapped = data.map((p: any) => {
