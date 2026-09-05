@@ -132,6 +132,12 @@ export default function IbuBosPage() {
   const [storeCount, setStoreCount] = useState(0);
   const [overviewDate, setOverviewDate] = useState(todayStr());
   const [supplyInputs, setSupplyInputs] = useState<Record<string, number>>({});
+  const [supplyReduceInputs, setSupplyReduceInputs] = useState<
+    Record<string, number>
+  >({});
+  const [supplyReduceReasons, setSupplyReduceReasons] = useState<
+    Record<string, string>
+  >({});
   const [pinBuyInputs, setPinBuyInputs] = useState<Record<string, number>>({});
   const [pinDefectInputs, setPinDefectInputs] = useState<
     Record<string, number>
@@ -164,22 +170,22 @@ export default function IbuBosPage() {
       );
     }
 
+    // Dibaca dari view `product_available_stock`, bukan tabel `stock` langsung.
+    // Produk tipe "tempel" (topi polos + pin) tidak punya stok fisik sendiri —
+    // view ini yang menghitung stok mereka dari min(stok topi polos, stok pin).
     const { data: productData } = await supabase
-      .from("products")
-      .select("id, full_name, photo_url, stock(available_qty)")
+      .from("product_available_stock")
+      .select("product_id, full_name, photo_url, available_qty")
       .eq("is_active", true)
-      .order("stock(available_qty)", { ascending: true });
+      .order("available_qty", { ascending: true });
     if (productData) {
       setProducts(
-        productData.map((p: any) => {
-          const stockRow = Array.isArray(p.stock) ? p.stock[0] : p.stock;
-          return {
-            id: p.id,
-            full_name: p.full_name,
-            photo_url: p.photo_url,
-            stock_qty: stockRow?.available_qty ?? 0,
-          };
-        }),
+        productData.map((p: any) => ({
+          id: p.product_id,
+          full_name: p.full_name,
+          photo_url: p.photo_url,
+          stock_qty: p.available_qty ?? 0,
+        })),
       );
     }
   }
@@ -326,31 +332,82 @@ export default function IbuBosPage() {
     loadCore();
   }
 
-  async function handleAddPin(pin: PinLogo) {
+  async function handleReduceSupply(supply: Supply) {
+    const qty = supplyReduceInputs[supply.id] || 0;
+    if (qty <= 0) return;
+    const reason = supplyReduceReasons[supply.id]?.trim() || null;
+
+    await supabase.from("packing_supply_adjustments").insert({
+      supply_id: supply.id,
+      quantity: qty,
+      reason,
+      adjusted_by: "Ibu Bos",
+    });
+    await supabase
+      .from("packing_supplies")
+      .update({
+        current_qty: Math.max(0, supply.current_qty - qty),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", supply.id);
+
+    setSupplyReduceInputs((prev) => ({ ...prev, [supply.id]: 0 }));
+    setSupplyReduceReasons((prev) => ({ ...prev, [supply.id]: "" }));
+    flash(`${supply.name} dikurangi ${qty}`);
+    loadCore();
+  }
+
+  // Beli pin baru: seluruh jumlah beli langsung menambah stok baik.
+  // Cacat dari batch pembelian yang sama dicatat terpisah lewat handleDefectPin
+  // (tidak otomatis dipotong di sini) supaya riwayatnya jelas di pin_losses.
+  async function handleBuyPin(pin: PinLogo) {
     const bought = pinBuyInputs[pin.id] || 0;
-    const defect = pinDefectInputs[pin.id] || 0;
     if (bought <= 0) return;
 
     await supabase.from("pin_purchases").insert({
       logo_id: pin.id,
       quantity_purchased: bought,
-      quantity_defect: defect,
+      quantity_defect: 0,
       purchased_by: "Ibu Bos",
     });
 
-    const goodQty = bought - defect;
     await supabase.from("pin_stock").upsert(
       {
         logo_id: pin.id,
-        available_qty: pin.available_qty + goodQty,
+        available_qty: pin.available_qty + bought,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "logo_id" },
     );
 
     setPinBuyInputs((prev) => ({ ...prev, [pin.id]: 0 }));
+    flash(`Pin ${pin.name}: +${bought} (beli)`);
+    loadCore();
+  }
+
+  // Cacat berdiri sendiri: mengurangi stok pin yang SUDAH ADA, tidak perlu
+  // ada pembelian baru dulu. Tercatat di pin_losses untuk riwayat.
+  async function handleDefectPin(pin: PinLogo) {
+    const defect = pinDefectInputs[pin.id] || 0;
+    if (defect <= 0) return;
+
+    await supabase.from("pin_losses").insert({
+      logo_id: pin.id,
+      quantity: defect,
+      reason: "Cacat",
+      reported_by: "Ibu Bos",
+    });
+
+    await supabase
+      .from("pin_stock")
+      .update({
+        available_qty: Math.max(0, pin.available_qty - defect),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("logo_id", pin.id);
+
     setPinDefectInputs((prev) => ({ ...prev, [pin.id]: 0 }));
-    flash(`Pin ${pin.name}: +${goodQty} baik`);
+    flash(`Pin ${pin.name}: -${defect} (cacat)`);
     loadCore();
   }
 
@@ -728,25 +785,59 @@ export default function IbuBosPage() {
                         Stok: {s.current_qty} {s.unit}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
-                        value={supplyInputs[s.id] || ""}
-                        onChange={(e) =>
-                          setSupplyInputs((prev) => ({
-                            ...prev,
-                            [s.id]: Number(e.target.value),
-                          }))
-                        }
-                        placeholder="0"
-                      />
-                      <button
-                        onClick={() => handleAddSupply(s)}
-                        className="bg-[#39FF88]/70 text-[#0B0D0C] font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#39FF88] hover:shadow-[0_0_12px_rgba(57,255,136,0.4)]"
-                      >
-                        Tambah
-                      </button>
+                    <div className="flex flex-col gap-2 items-end">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
+                          value={supplyInputs[s.id] || ""}
+                          onChange={(e) =>
+                            setSupplyInputs((prev) => ({
+                              ...prev,
+                              [s.id]: Number(e.target.value),
+                            }))
+                          }
+                          placeholder="0"
+                        />
+                        <button
+                          onClick={() => handleAddSupply(s)}
+                          className="bg-[#39FF88]/70 text-[#0B0D0C] font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#39FF88] hover:shadow-[0_0_12px_rgba(57,255,136,0.4)]"
+                        >
+                          Tambah
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          className="w-28 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
+                          placeholder="Alasan (opsional)"
+                          value={supplyReduceReasons[s.id] || ""}
+                          onChange={(e) =>
+                            setSupplyReduceReasons((prev) => ({
+                              ...prev,
+                              [s.id]: e.target.value,
+                            }))
+                          }
+                        />
+                        <input
+                          type="number"
+                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
+                          value={supplyReduceInputs[s.id] || ""}
+                          onChange={(e) =>
+                            setSupplyReduceInputs((prev) => ({
+                              ...prev,
+                              [s.id]: Number(e.target.value),
+                            }))
+                          }
+                          placeholder="0"
+                        />
+                        <button
+                          onClick={() => handleReduceSupply(s)}
+                          className="bg-[#FF5470]/20 text-[#FF5470] border border-[#FF5470]/40 font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#FF5470]/30"
+                        >
+                          Kurangi
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -769,37 +860,47 @@ export default function IbuBosPage() {
                         Stok baik: {p.available_qty}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
-                        placeholder="Beli"
-                        value={pinBuyInputs[p.id] || ""}
-                        onChange={(e) =>
-                          setPinBuyInputs((prev) => ({
-                            ...prev,
-                            [p.id]: Number(e.target.value),
-                          }))
-                        }
-                      />
-                      <input
-                        type="number"
-                        className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
-                        placeholder="Cacat"
-                        value={pinDefectInputs[p.id] || ""}
-                        onChange={(e) =>
-                          setPinDefectInputs((prev) => ({
-                            ...prev,
-                            [p.id]: Number(e.target.value),
-                          }))
-                        }
-                      />
-                      <button
-                        onClick={() => handleAddPin(p)}
-                        className="bg-[#39FF88]/70 text-[#0B0D0C] font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#39FF88] hover:shadow-[0_0_12px_rgba(57,255,136,0.4)]"
-                      >
-                        Simpan
-                      </button>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
+                          placeholder="Beli"
+                          value={pinBuyInputs[p.id] || ""}
+                          onChange={(e) =>
+                            setPinBuyInputs((prev) => ({
+                              ...prev,
+                              [p.id]: Number(e.target.value),
+                            }))
+                          }
+                        />
+                        <button
+                          onClick={() => handleBuyPin(p)}
+                          className="bg-[#39FF88]/70 text-[#0B0D0C] font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#39FF88] hover:shadow-[0_0_12px_rgba(57,255,136,0.4)]"
+                        >
+                          Beli
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
+                          placeholder="Cacat"
+                          value={pinDefectInputs[p.id] || ""}
+                          onChange={(e) =>
+                            setPinDefectInputs((prev) => ({
+                              ...prev,
+                              [p.id]: Number(e.target.value),
+                            }))
+                          }
+                        />
+                        <button
+                          onClick={() => handleDefectPin(p)}
+                          className="bg-[#FF5470]/20 text-[#FF5470] border border-[#FF5470]/40 font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#FF5470]/30"
+                        >
+                          Cacat
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
