@@ -497,15 +497,19 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
       flash("Pilih toko, produk, dan jumlah dulu", "warning");
       return;
     }
+
     const { data: stockRow } = await supabase
       .from("stock")
       .select("available_qty")
       .eq("product_id", selectedProduct)
       .maybeSingle();
+
     if (!stockRow || stockRow.available_qty < quantity) {
       flash("Stok tidak cukup!", "error");
       return;
     }
+
+    // 1. Simpan Transaksi Penjualan
     await supabase.from("sales").insert({
       product_id: selectedProduct,
       store_id: selectedStore,
@@ -513,6 +517,8 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
       sold_by: currentUser,
       sold_at: `${transactionDate}T12:00:00`,
     });
+
+    // 2. Kurangi Stok Produk Utama
     await supabase
       .from("stock")
       .update({
@@ -520,6 +526,98 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
         updated_at: new Date().toISOString(),
       })
       .eq("product_id", selectedProduct);
+
+    // 3. LOGIKA OTOMATIS: PIN & TOPI POLOS (Khusus Produk Tipe Tempel)
+    const { data: product } = await supabase
+      .from("products")
+      .select("model_id, color_id, logo_id, logos(type)")
+      .eq("id", selectedProduct)
+      .single();
+
+    if (product) {
+      const logoType = (product as any).logos?.type;
+
+      if (logoType === "tempel") {
+        // A. Kurangi Stok Pin
+        if (product.logo_id) {
+          const { data: pinStock } = await supabase
+            .from("pin_stock")
+            .select("available_qty")
+            .eq("logo_id", product.logo_id)
+            .maybeSingle();
+
+          if (pinStock) {
+            await supabase
+              .from("pin_stock")
+              .update({
+                available_qty: Math.max(0, pinStock.available_qty - quantity),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("logo_id", product.logo_id);
+          }
+        }
+
+        // B. Kurangi Stok Topi Polos (Varian Model & Warna Sama)
+        const { data: polosLogo } = await supabase
+          .from("logos")
+          .select("id")
+          .eq("type", "polos")
+          .maybeSingle();
+
+        if (polosLogo) {
+          const { data: polosProduct } = await supabase
+            .from("products")
+            .select("id")
+            .eq("model_id", product.model_id)
+            .eq("color_id", product.color_id)
+            .eq("logo_id", polosLogo.id)
+            .maybeSingle();
+
+          if (polosProduct) {
+            const { data: polosStock } = await supabase
+              .from("stock")
+              .select("available_qty")
+              .eq("product_id", polosProduct.id)
+              .maybeSingle();
+
+            if (polosStock) {
+              await supabase
+                .from("stock")
+                .update({
+                  available_qty: Math.max(
+                    0,
+                    polosStock.available_qty - quantity,
+                  ),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("product_id", polosProduct.id);
+            }
+          }
+        }
+      }
+
+      // 4. LOGIKA OTOMATIS: BAHAN PELENGKAP (Packing Supplies)
+      const packingItems = ["Plastik", "Kertas Resi", "Box Putih"];
+
+      for (const itemName of packingItems) {
+        const { data: supply } = await supabase
+          .from("packing_supplies")
+          .select("id, current_qty")
+          .ilike("name", `%${itemName}%`)
+          .maybeSingle();
+
+        if (supply) {
+          await supabase
+            .from("packing_supplies")
+            .update({
+              current_qty: Math.max(0, supply.current_qty - quantity),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", supply.id);
+        }
+      }
+    }
+
     flash("Penjualan tersimpan!", "success");
     setQuantity(0);
     setSelectedProduct("");
