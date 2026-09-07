@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -19,6 +19,8 @@ import {
   Flame,
   Menu,
   X,
+  ImagePlus,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -1623,7 +1625,11 @@ const MASTER_TABS = [
   { id: "logo", label: "Logo", table: "logos" },
 ] as const;
 
-type MasterTabId = (typeof MASTER_TABS)[number]["id"];
+const PRODUCT_TAB = { id: "produk", label: "Produk" } as const;
+
+const ALL_TABS = [...MASTER_TABS, PRODUCT_TAB];
+
+type MasterTabId = (typeof MASTER_TABS)[number]["id"] | typeof PRODUCT_TAB.id;
 
 function MasterDataSection({ currentUser }: { currentUser: string }) {
   const [activeTab, setActiveTab] = useState<MasterTabId>("model");
@@ -1633,9 +1639,10 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
   const [newType, setNewType] = useState<"bordir" | "tempel">("bordir");
   const [message, setMessage] = useState<FlashMessage | null>(null);
 
-  const currentTab = MASTER_TABS.find((t) => t.id === activeTab)!;
+  const currentTab = MASTER_TABS.find((t) => t.id === activeTab);
 
   async function loadItems() {
+    if (!currentTab) return; // tab "produk" punya sumber data & form sendiri
     const { data } = await supabase
       .from(currentTab.table)
       .select("*")
@@ -1655,6 +1662,7 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
   }
 
   async function handleAdd() {
+    if (!currentTab) return;
     if (!newName.trim() || !newCode.trim()) {
       flash("Isi nama dan kode dulu", "warning");
       return;
@@ -1695,7 +1703,7 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
 
       {/* Tab dimensi */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-1 -mx-1 px-1">
-        {MASTER_TABS.map((t) => (
+        {ALL_TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
@@ -1710,93 +1718,433 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
-        {/* Daftar item yang sudah ada */}
+      {activeTab === "produk" ? (
+        <ProductFormSection currentUser={currentUser} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
+          {/* Daftar item yang sudah ada */}
+          <div>
+            <h3 className="text-sm text-neutral-500 font-medium mb-3">
+              {currentTab!.label} yang sudah ada ({items.length})
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className="bg-panel border border-line rounded-lg px-3.5 py-3"
+                >
+                  <p className="text-sm text-neutral-200 truncate">
+                    {item.name}
+                  </p>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    {item.code}
+                    {item.type && (
+                      <span className="ml-1.5 text-neutral-600">
+                        · {item.type}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              ))}
+              {items.length === 0 && (
+                <p className="text-neutral-500 text-sm col-span-3">
+                  Belum ada data
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Form tambah baru */}
+          <div className="bg-panel border border-line rounded-xl p-5 lg:sticky lg:top-20">
+            <h3 className="text-sm font-medium text-neutral-300 mb-4">
+              Tambah {currentTab!.label} Baru
+            </h3>
+
+            <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+              Nama
+            </label>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="cth: Merah Marun"
+              className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
+            />
+
+            <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+              Kode (3 huruf)
+            </label>
+            <input
+              type="text"
+              value={newCode}
+              onChange={(e) => setNewCode(e.target.value.slice(0, 4))}
+              placeholder="cth: MRN"
+              className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 uppercase focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
+            />
+
+            {activeTab === "logo" && (
+              <>
+                <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+                  Jenis Logo
+                </label>
+                <select
+                  value={newType}
+                  onChange={(e) =>
+                    setNewType(e.target.value as "bordir" | "tempel")
+                  }
+                  className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
+                >
+                  <option value="bordir">Bordir</option>
+                  <option value="tempel">Tempel (Pin Logam)</option>
+                </select>
+              </>
+            )}
+
+            <button
+              onClick={handleAdd}
+              className="shine-btn w-full bg-accent-500 hover:bg-accent-400 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95 mt-1"
+            >
+              Tambah {currentTab!.label}
+            </button>
+
+            <p className="text-[11px] text-neutral-600 mt-3">
+              Ditambahkan oleh {currentUser}. Ingat diskusiin dulu sama tim
+              sebelum nambah ya.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type MasterOption = { id: string; name: string; code: string; type?: string };
+
+function ProductFormSection({ currentUser }: { currentUser: string }) {
+  const [hatModels, setHatModels] = useState<MasterOption[]>([]);
+  const [materials, setMaterials] = useState<MasterOption[]>([]);
+  const [colors, setColors] = useState<MasterOption[]>([]);
+  const [logos, setLogos] = useState<MasterOption[]>([]);
+  const [existingProducts, setExistingProducts] = useState<
+    {
+      id: string;
+      sku: string;
+      full_name: string;
+      photo_url: string | null;
+    }[]
+  >([]);
+
+  const [hatModelId, setHatModelId] = useState("");
+  const [materialId, setMaterialId] = useState("");
+  const [colorId, setColorId] = useState("");
+  const [logoId, setLogoId] = useState("");
+  const [sku, setSku] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<FlashMessage | null>(null);
+
+  function flash(text: string, type: FlashType = "success") {
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 2500);
+  }
+
+  async function loadMasterOptions() {
+    const [hm, mt, cl, lg] = await Promise.all([
+      supabase.from("hat_models").select("id, name, code").order("name"),
+      supabase.from("materials").select("id, name, code").order("name"),
+      supabase.from("colors").select("id, name, code").order("name"),
+      supabase.from("logos").select("id, name, code, type").order("name"),
+    ]);
+    setHatModels(hm.data ?? []);
+    setMaterials(mt.data ?? []);
+    setColors(cl.data ?? []);
+    setLogos(lg.data ?? []);
+  }
+
+  async function loadExistingProducts() {
+    const { data } = await supabase
+      .from("products")
+      .select("id, sku, full_name, photo_url")
+      .order("created_at", { ascending: false })
+      .limit(60);
+    setExistingProducts(data ?? []);
+  }
+
+  useEffect(() => {
+    loadMasterOptions();
+    loadExistingProducts();
+  }, []);
+
+  // Auto-suggest SKU & nama produk begitu 4 dropdown di atas udah kepilih
+  // semua. Tetap bisa diedit manual di kolomnya sebelum disimpan.
+  useEffect(() => {
+    if (!hatModelId || !materialId || !colorId || !logoId) return;
+    const hm = hatModels.find((x) => x.id === hatModelId);
+    const mt = materials.find((x) => x.id === materialId);
+    const cl = colors.find((x) => x.id === colorId);
+    const lg = logos.find((x) => x.id === logoId);
+    if (!hm || !mt || !cl || !lg) return;
+
+    setSku(`${hm.code}-${mt.code}-${cl.code}-${lg.code}`.toUpperCase());
+    setFullName(`Topi ${hm.name} ${mt.name} ${cl.name} ${lg.name}`);
+  }, [
+    hatModelId,
+    materialId,
+    colorId,
+    logoId,
+    hatModels,
+    materials,
+    colors,
+    logos,
+  ]);
+
+  function handlePhotoChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  }
+
+  async function handleSubmit() {
+    if (!hatModelId || !materialId || !colorId || !logoId) {
+      flash("Pilih Model, Bahan, Warna, dan Logo dulu", "warning");
+      return;
+    }
+    if (!sku.trim() || !fullName.trim()) {
+      flash("SKU dan nama produk gak boleh kosong", "warning");
+      return;
+    }
+
+    setSaving(true);
+
+    // Upload foto dulu (kalau ada) sebelum insert baris produknya, biar
+    // photo_url-nya udah siap dipasang bareng data lain dalam satu insert.
+    let photoUrl: string | null = null;
+    if (photoFile) {
+      const ext = photoFile.name.split(".").pop();
+      const path = `${sku.trim().toLowerCase()}-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("product-photos")
+        .upload(path, photoFile);
+
+      if (uploadError) {
+        setSaving(false);
+        flash("Gagal upload foto: " + uploadError.message, "error");
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from("product-photos")
+        .getPublicUrl(path);
+      photoUrl = publicUrlData.publicUrl;
+    }
+
+    const { error } = await supabase.from("products").insert({
+      hat_model_id: hatModelId,
+      material_id: materialId,
+      color_id: colorId,
+      logo_id: logoId,
+      sku: sku.trim().toUpperCase(),
+      full_name: fullName.trim(),
+      photo_url: photoUrl,
+      is_active: true,
+    });
+
+    setSaving(false);
+
+    if (error) {
+      flash(
+        error.message.toLowerCase().includes("duplicate")
+          ? "SKU ini sudah ada, coba cek lagi kombinasinya"
+          : "Gagal menambah produk, coba lagi",
+        "error",
+      );
+      return;
+    }
+
+    flash("Produk baru ditambahkan!", "success");
+    setHatModelId("");
+    setMaterialId("");
+    setColorId("");
+    setLogoId("");
+    setSku("");
+    setFullName("");
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    loadExistingProducts();
+  }
+
+  return (
+    <div>
+      <StatusBanner message={message} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 items-start">
+        {/* Daftar produk yang sudah ada */}
         <div>
           <h3 className="text-sm text-neutral-500 font-medium mb-3">
-            {currentTab.label} yang sudah ada ({items.length})
+            Produk yang sudah ada ({existingProducts.length})
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-            {items.map((item) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[560px] overflow-y-auto pr-1">
+            {existingProducts.map((p) => (
               <div
-                key={item.id}
-                className="bg-panel border border-line rounded-lg px-3.5 py-3"
+                key={p.id}
+                className="bg-panel border border-line rounded-lg overflow-hidden"
               >
-                <p className="text-sm text-neutral-200 truncate">{item.name}</p>
-                <p className="text-xs text-neutral-500 mt-0.5">
-                  {item.code}
-                  {item.type && (
-                    <span className="ml-1.5 text-neutral-600">
-                      · {item.type}
-                    </span>
+                <div className="aspect-square bg-black/30">
+                  {p.photo_url && (
+                    <img
+                      src={p.photo_url}
+                      alt={p.full_name}
+                      className="w-full h-full object-cover"
+                    />
                   )}
-                </p>
+                </div>
+                <div className="p-2.5">
+                  <p className="text-xs text-neutral-200 truncate">
+                    {p.full_name}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 mt-0.5">{p.sku}</p>
+                </div>
               </div>
             ))}
-            {items.length === 0 && (
+            {existingProducts.length === 0 && (
               <p className="text-neutral-500 text-sm col-span-3">
-                Belum ada data
+                Belum ada produk
               </p>
             )}
           </div>
         </div>
 
-        {/* Form tambah baru */}
+        {/* Form tambah produk baru */}
         <div className="bg-panel border border-line rounded-xl p-5 lg:sticky lg:top-20">
           <h3 className="text-sm font-medium text-neutral-300 mb-4">
-            Tambah {currentTab.label} Baru
+            Tambah Produk Baru
           </h3>
 
           <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
-            Nama
+            Model Topi
+          </label>
+          <select
+            value={hatModelId}
+            onChange={(e) => setHatModelId(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
+          >
+            <option value="">— pilih —</option>
+            {hatModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} ({m.code})
+              </option>
+            ))}
+          </select>
+
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            Bahan
+          </label>
+          <select
+            value={materialId}
+            onChange={(e) => setMaterialId(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
+          >
+            <option value="">— pilih —</option>
+            {materials.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} ({m.code})
+              </option>
+            ))}
+          </select>
+
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            Warna
+          </label>
+          <select
+            value={colorId}
+            onChange={(e) => setColorId(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
+          >
+            <option value="">— pilih —</option>
+            {colors.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.code})
+              </option>
+            ))}
+          </select>
+
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            Logo
+          </label>
+          <select
+            value={logoId}
+            onChange={(e) => setLogoId(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
+          >
+            <option value="">— pilih —</option>
+            {logos.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name} ({l.code}) · {l.type}
+              </option>
+            ))}
+          </select>
+
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            SKU
           </label>
           <input
             type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="cth: Merah Marun"
-            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
+            value={sku}
+            onChange={(e) => setSku(e.target.value.toUpperCase())}
+            placeholder="Otomatis terisi dari pilihan di atas"
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 uppercase focus:outline-none focus:border-accent-500"
           />
 
           <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
-            Kode (3 huruf)
+            Nama Produk
           </label>
           <input
             type="text"
-            value={newCode}
-            onChange={(e) => setNewCode(e.target.value.slice(0, 4))}
-            placeholder="cth: MRN"
-            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 uppercase focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="Otomatis terisi, bisa diedit"
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
           />
 
-          {activeTab === "logo" && (
-            <>
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
-                Jenis Logo
-              </label>
-              <select
-                value={newType}
-                onChange={(e) =>
-                  setNewType(e.target.value as "bordir" | "tempel")
-                }
-                className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
-              >
-                <option value="bordir">Bordir</option>
-                <option value="tempel">Tempel (Pin Logam)</option>
-              </select>
-            </>
-          )}
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            Foto Produk
+          </label>
+          <label className="flex items-center justify-center gap-2 w-full border border-dashed border-line rounded-lg px-3 py-4 text-sm text-neutral-400 mb-3 cursor-pointer hover:border-accent-500 hover:text-neutral-200 transition-colors">
+            {photoPreview ? (
+              <img
+                src={photoPreview}
+                alt="Preview"
+                className="h-20 rounded-md object-cover"
+              />
+            ) : (
+              <span className="flex items-center gap-2">
+                <ImagePlus size={16} />
+                Pilih foto
+              </span>
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoChange}
+              className="hidden"
+            />
+          </label>
 
           <button
-            onClick={handleAdd}
-            className="shine-btn w-full bg-accent-500 hover:bg-accent-400 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95 mt-1"
+            onClick={handleSubmit}
+            disabled={saving}
+            className="shine-btn w-full bg-accent-500 hover:bg-accent-400 disabled:opacity-60 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95 mt-1 flex items-center justify-center gap-2"
           >
-            Tambah {currentTab.label}
+            {saving && <Loader2 size={16} className="animate-spin" />}
+            {saving ? "Menyimpan..." : "Tambah Produk"}
           </button>
 
           <p className="text-[11px] text-neutral-600 mt-3">
-            Ditambahkan oleh {currentUser}. Ingat diskusiin dulu sama tim
-            sebelum nambah ya.
+            Ditambahkan oleh {currentUser}. SKU & nama otomatis terisi dari
+            pilihan di atas, tapi bisa diedit sebelum disimpan.
           </p>
         </div>
       </div>
