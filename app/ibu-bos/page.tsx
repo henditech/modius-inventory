@@ -143,6 +143,14 @@ export default function IbuBosPage() {
     Record<string, number>
   >({});
   const [message, setMessage] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   async function loadCore() {
     const { data: supplyData } = await supabase
@@ -412,9 +420,9 @@ export default function IbuBosPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0B0D0C] text-[#EAF2EE] font-[Inter,sans-serif] flex">
-      {/* Sidebar */}
-      <div className="w-56 shrink-0 border-r border-[#262E2A] min-h-screen p-4">
+    <div className="min-h-screen bg-[#0B0D0C] text-[#EAF2EE] font-[Inter,sans-serif] flex flex-col md:flex-row">
+      {/* Sidebar - desktop only */}
+      <div className="hidden md:block w-56 shrink-0 border-r border-[#262E2A] min-h-screen p-4">
         <h1 className="text-lg font-[Sora,sans-serif] font-semibold tracking-tight mb-8 flex items-center gap-2 px-1">
           <span className="w-2 h-2 rounded-full bg-[#39FF88]" />
           Panel Ibu Bos
@@ -445,9 +453,41 @@ export default function IbuBosPage() {
         </nav>
       </div>
 
+      {/* Header + tab nav - mobile only */}
+      <div className="md:hidden sticky top-0 z-30 bg-[#0B0D0C]/95 backdrop-blur-sm border-b border-[#262E2A]">
+        <h1 className="text-base font-[Sora,sans-serif] font-semibold tracking-tight flex items-center gap-2 px-4 pt-4 pb-3">
+          <span className="w-2 h-2 rounded-full bg-[#39FF88]" />
+          Panel Ibu Bos
+        </h1>
+        <nav className="flex px-2 pb-1 gap-1">
+          {NAV.map((s) => {
+            const Icon = s.icon;
+            const active = activeSection === s.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setActiveSection(s.id)}
+                className={`flex-1 flex flex-col items-center gap-1 px-2 py-2 rounded-lg text-[11px] font-medium transition-colors duration-200 ${
+                  active
+                    ? "bg-[#39FF88]/10 text-white"
+                    : "text-[#8FA39A] hover:bg-white/5"
+                }`}
+              >
+                <Icon
+                  size={18}
+                  strokeWidth={1.75}
+                  className={active ? "text-[#39FF88]" : "text-[#8FA39A]"}
+                />
+                {s.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
       {/* Konten */}
-      <div className="flex-1 px-10 py-8 max-w-[1400px]">
-        <div className="flex items-baseline justify-between mb-8">
+      <div className="flex-1 px-4 py-6 md:px-10 md:py-8 max-w-[1400px] w-full min-w-0">
+        <div className="hidden md:flex items-baseline justify-between mb-8">
           <h2 className="text-2xl font-[Sora,sans-serif] font-semibold tracking-tight">
             {NAV.find((s) => s.id === activeSection)?.label}
           </h2>
@@ -457,6 +497,11 @@ export default function IbuBosPage() {
             </div>
           )}
         </div>
+        {message && (
+          <div className="md:hidden text-sm font-medium text-center text-[#39FF88] bg-[#39FF88]/10 border border-[#39FF88]/30 rounded-full px-4 py-1.5 mb-4">
+            {message}
+          </div>
+        )}
 
         {/* ===== OVERVIEW ===== */}
         {activeSection === "overview" && (
@@ -486,7 +531,7 @@ export default function IbuBosPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-5 gap-4 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
               <StatCard
                 icon={Package}
                 label="Total Produk"
@@ -523,7 +568,7 @@ export default function IbuBosPage() {
               />
             </div>
 
-            <div className="grid grid-cols-[1.6fr_1fr] gap-4 mb-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 mb-6">
               <div className="bg-[#151A18] border border-[#262E2A] rounded-xl p-5">
                 <h3 className="text-sm font-medium text-[#8FA39A] mb-4">
                   {isOverviewToday
@@ -650,11 +695,14 @@ export default function IbuBosPage() {
                         fontSize={11}
                         tickLine={false}
                         axisLine={false}
-                        width={200}
+                        width={isMobile ? 110 : 200}
                         tick={{ fill: "#EAF2EE" }}
-                        tickFormatter={(value: string) =>
-                          value.length > 26 ? value.slice(0, 24) + "…" : value
-                        }
+                        tickFormatter={(value: string) => {
+                          const max = isMobile ? 14 : 26;
+                          return value.length > max
+                            ? value.slice(0, max - 2) + "…"
+                            : value;
+                        }}
                       />
                       <Tooltip
                         {...CHART_TOOLTIP_STYLE}
@@ -706,7 +754,7 @@ export default function IbuBosPage() {
                   Belum ada data bahan pelengkap atau pin
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-2 max-h-[280px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[280px] overflow-y-auto pr-1">
                   {pelengkapList.map((item) => (
                     <div
                       key={item.id}
@@ -735,7 +783,7 @@ export default function IbuBosPage() {
 
         {/* ===== STOK TOPI ===== */}
         {activeSection === "topi" && (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
             {products.map((p) => {
               const status = getStockStatus(p.stock_qty);
               return (
@@ -771,7 +819,7 @@ export default function IbuBosPage() {
 
         {/* ===== STOK PELENGKAP ===== */}
         {activeSection === "pelengkap" && (
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
             <div>
               <h3 className="text-sm uppercase tracking-wide text-[#8FA39A] font-medium mb-4">
                 Bahan Pelengkap
@@ -780,7 +828,7 @@ export default function IbuBosPage() {
                 {supplies.map((s) => (
                   <div
                     key={s.id}
-                    className="flex items-center justify-between bg-[#151A18] border border-[#262E2A] rounded-xl px-4 py-3.5 hover:border-[#39FF88]/30 transition-colors"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#151A18] border border-[#262E2A] rounded-xl px-4 py-3.5 hover:border-[#39FF88]/30 transition-colors"
                   >
                     <div>
                       <p className="font-medium">{s.name}</p>
@@ -788,7 +836,7 @@ export default function IbuBosPage() {
                         Stok: {s.current_qty} {s.unit}
                       </p>
                     </div>
-                    <div className="flex flex-col gap-2 items-end">
+                    <div className="flex flex-col gap-2 items-start sm:items-end">
                       <div className="flex items-center gap-2">
                         <input
                           type="number"
