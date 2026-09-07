@@ -438,22 +438,22 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
   const [transactionDate, setTransactionDate] = useState(todayStr());
 
   async function loadProductsAndStores() {
+    // Dibaca dari view product_available_stock, bukan tabel stock mentah --
+    // supaya produk tipe "tempel" (topi polos + pin) juga tampil dengan
+    // angka stok yang benar (dihitung dari stok komponennya), bukan 0/stale.
     const { data: productData } = await supabase
-      .from("products")
-      .select("id, full_name, photo_url, stock(available_qty)")
+      .from("product_available_stock")
+      .select("product_id, full_name, photo_url, available_qty")
       .eq("is_active", true)
       .order("full_name");
     if (productData) {
       setProducts(
-        productData.map((p: any) => {
-          const stockRow = Array.isArray(p.stock) ? p.stock[0] : p.stock;
-          return {
-            id: p.id,
-            full_name: p.full_name,
-            photo_url: p.photo_url,
-            stock_qty: stockRow?.available_qty ?? 0,
-          };
-        }),
+        productData.map((p: any) => ({
+          id: p.product_id,
+          full_name: p.full_name,
+          photo_url: p.photo_url,
+          stock_qty: p.available_qty ?? 0,
+        })),
       );
     }
 
@@ -498,19 +498,17 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
       return;
     }
 
-    const { data: stockRow } = await supabase
-      .from("stock")
-      .select("available_qty")
-      .eq("product_id", selectedProduct)
-      .maybeSingle();
-
-    if (!stockRow || stockRow.available_qty < quantity) {
+    const productData = products.find((p) => p.id === selectedProduct);
+    if (!productData || productData.stock_qty < quantity) {
       flash("Stok tidak cukup!", "error");
       return;
     }
 
-    // 1. Simpan Transaksi Penjualan
-    await supabase.from("sales").insert({
+    // Cukup catat transaksi penjualannya di sini. Pengurangan stok produk,
+    // pin (untuk produk tempel), dan SEMUA bahan pelengkap sudah ditangani
+    // otomatis oleh trigger database begitu baris sales ini masuk --
+    // jangan duplikasi logika pengurangan stok manual di sini lagi.
+    const { error } = await supabase.from("sales").insert({
       product_id: selectedProduct,
       store_id: selectedStore,
       quantity,
@@ -518,104 +516,9 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
       sold_at: `${transactionDate}T12:00:00`,
     });
 
-    // 2. Kurangi Stok Produk Utama
-    await supabase
-      .from("stock")
-      .update({
-        available_qty: stockRow.available_qty - quantity,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("product_id", selectedProduct);
-
-    // 3. LOGIKA OTOMATIS: PIN & TOPI POLOS (Khusus Produk Tipe Tempel)
-    const { data: product } = await supabase
-      .from("products")
-      .select("model_id, color_id, logo_id, logos(type)")
-      .eq("id", selectedProduct)
-      .single();
-
-    if (product) {
-      const logoType = (product as any).logos?.type;
-
-      if (logoType === "tempel") {
-        // A. Kurangi Stok Pin
-        if (product.logo_id) {
-          const { data: pinStock } = await supabase
-            .from("pin_stock")
-            .select("available_qty")
-            .eq("logo_id", product.logo_id)
-            .maybeSingle();
-
-          if (pinStock) {
-            await supabase
-              .from("pin_stock")
-              .update({
-                available_qty: Math.max(0, pinStock.available_qty - quantity),
-                updated_at: new Date().toISOString(),
-              })
-              .eq("logo_id", product.logo_id);
-          }
-        }
-
-        // B. Kurangi Stok Topi Polos (Varian Model & Warna Sama)
-        const { data: polosLogo } = await supabase
-          .from("logos")
-          .select("id")
-          .eq("type", "polos")
-          .maybeSingle();
-
-        if (polosLogo) {
-          const { data: polosProduct } = await supabase
-            .from("products")
-            .select("id")
-            .eq("model_id", product.model_id)
-            .eq("color_id", product.color_id)
-            .eq("logo_id", polosLogo.id)
-            .maybeSingle();
-
-          if (polosProduct) {
-            const { data: polosStock } = await supabase
-              .from("stock")
-              .select("available_qty")
-              .eq("product_id", polosProduct.id)
-              .maybeSingle();
-
-            if (polosStock) {
-              await supabase
-                .from("stock")
-                .update({
-                  available_qty: Math.max(
-                    0,
-                    polosStock.available_qty - quantity,
-                  ),
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("product_id", polosProduct.id);
-            }
-          }
-        }
-      }
-
-      // 4. LOGIKA OTOMATIS: BAHAN PELENGKAP (Packing Supplies)
-      const packingItems = ["Plastik", "Kertas Resi", "Box Putih"];
-
-      for (const itemName of packingItems) {
-        const { data: supply } = await supabase
-          .from("packing_supplies")
-          .select("id, current_qty")
-          .ilike("name", `%${itemName}%`)
-          .maybeSingle();
-
-        if (supply) {
-          await supabase
-            .from("packing_supplies")
-            .update({
-              current_qty: Math.max(0, supply.current_qty - quantity),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", supply.id);
-        }
-      }
+    if (error) {
+      flash("Gagal simpan, coba lagi", "error");
+      return;
     }
 
     flash("Penjualan tersimpan!", "success");
@@ -1215,6 +1118,18 @@ function OverviewSection() {
   const [overviewDate, setOverviewDate] = useState(todayStr());
   const [salesLast7, setSalesLast7] = useState(0);
   const [loadingTrend, setLoadingTrend] = useState(false);
+  const [storeHealth, setStoreHealth] = useState<
+    {
+      id: string;
+      name: string;
+      code: string;
+      managed_by: string;
+      current: number;
+      previous: number;
+      status: "kosong" | "turun" | "stabil" | "naik";
+      changePct: number | null;
+    }[]
+  >([]);
 
   useEffect(() => {
     loadStockSummary();
@@ -1225,23 +1140,25 @@ function OverviewSection() {
   }, [overviewDate]);
 
   async function loadStockSummary() {
-    // Ringkasan status stok
+    // Dibaca dari view product_available_stock, bukan tabel stock mentah --
+    // supaya produk tipe "tempel" ikut terhitung dengan angka yang benar.
     const { data: stockData } = await supabase
-      .from("stock")
-      .select("available_qty, products(full_name, photo_url)");
+      .from("product_available_stock")
+      .select("available_qty, full_name, photo_url")
+      .eq("is_active", true);
 
     if (stockData) {
       let aman = 0,
         menipis = 0,
         kritis = 0;
       const list = stockData.map((s: any) => {
-        const qty = s.available_qty;
+        const qty = s.available_qty ?? 0;
         if (qty <= 50) kritis++;
         else if (qty <= 100) menipis++;
         else aman++;
         return {
-          full_name: s.products?.full_name ?? "?",
-          photo_url: s.products?.photo_url ?? null,
+          full_name: s.full_name ?? "?",
+          photo_url: s.photo_url ?? null,
           qty,
         };
       });
@@ -1275,9 +1192,16 @@ function OverviewSection() {
 
     const { data: salesData } = await supabase
       .from("sales")
-      .select("quantity, sold_at, products(full_name)")
+      .select(
+        "quantity, sold_at, store_id, products(full_name), stores(name, code, managed_by)",
+      )
       .gte("sold_at", start.toISOString())
       .lt("sold_at", end.toISOString());
+
+    const { data: allStores } = await supabase
+      .from("stores")
+      .select("id, name, code, managed_by")
+      .order("code");
 
     const sevenDaysAgo = new Date(reference);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
@@ -1285,6 +1209,7 @@ function OverviewSection() {
 
     let last7Total = 0;
     const byProduct: Record<string, number> = {};
+    const byStore: Record<string, { current: number; previous: number }> = {};
 
     (salesData ?? []).forEach((s: any) => {
       const dayKey = (s.sold_at as string).split("T")[0];
@@ -1293,12 +1218,20 @@ function OverviewSection() {
         targetDay.total += s.quantity;
       }
 
-      if (new Date(s.sold_at) >= sevenDaysAgo) {
+      const isCurrentPeriod = new Date(s.sold_at) >= sevenDaysAgo;
+      if (isCurrentPeriod) {
         last7Total += s.quantity;
       }
 
       const name = s.products?.full_name ?? "?";
       byProduct[name] = (byProduct[name] || 0) + s.quantity;
+
+      if (s.store_id) {
+        if (!byStore[s.store_id])
+          byStore[s.store_id] = { current: 0, previous: 0 };
+        if (isCurrentPeriod) byStore[s.store_id].current += s.quantity;
+        else byStore[s.store_id].previous += s.quantity;
+      }
     });
 
     setTrend(days.map((d) => ({ date: d.key, total: d.total })));
@@ -1310,6 +1243,53 @@ function OverviewSection() {
       .slice(0, 5);
     setTopProducts(ranked);
 
+    // Kesehatan toko: bandingkan 7 hari terakhir vs 7 hari sebelum itu,
+    // per toko. Toko tanpa penjualan sama sekali tetap dimasukkan (bukan
+    // cuma toko yang ada transaksinya) supaya kelihatan kalau ada toko
+    // yang "diam" total -- itu justru yang paling perlu diperhatikan.
+    const health = (allStores ?? []).map((store: any) => {
+      const stat = byStore[store.id] ?? { current: 0, previous: 0 };
+      let status: "kosong" | "turun" | "stabil" | "naik";
+      let changePct: number | null;
+
+      if (stat.current === 0 && stat.previous === 0) {
+        status = "kosong";
+        changePct = null;
+      } else if (stat.previous === 0) {
+        status = "naik";
+        changePct = null; // baru mulai jual, belum ada pembanding
+      } else {
+        changePct = ((stat.current - stat.previous) / stat.previous) * 100;
+        if (changePct <= -20) status = "turun";
+        else if (changePct >= 20) status = "naik";
+        else status = "stabil";
+      }
+
+      return {
+        id: store.id,
+        name: store.name,
+        code: store.code,
+        managed_by: store.managed_by,
+        current: stat.current,
+        previous: stat.previous,
+        status,
+        changePct,
+      };
+    });
+
+    const statusPriority: Record<string, number> = {
+      kosong: 0,
+      turun: 1,
+      stabil: 2,
+      naik: 3,
+    };
+    health.sort((a, b) => {
+      const p = statusPriority[a.status] - statusPriority[b.status];
+      if (p !== 0) return p;
+      return (a.changePct ?? 0) - (b.changePct ?? 0);
+    });
+    setStoreHealth(health);
+
     setLoadingTrend(false);
   }
 
@@ -1317,6 +1297,9 @@ function OverviewSection() {
   const needsProduction = stockSummary.kritis + stockSummary.menipis;
   const rangeDaysCount = trend.length;
   const isOverviewToday = overviewDate === todayStr();
+  const storesNeedAttention = storeHealth.filter(
+    (s) => s.status === "kosong" || s.status === "turun",
+  ).length;
 
   const statusChartData = [
     { name: "Aman", value: stockSummary.aman, color: "#34d399" },
@@ -1345,7 +1328,7 @@ function OverviewSection() {
       </h2>
 
       {/* Kartu ringkasan */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <StatCard
           icon={Package}
           label="Total Produk Dipantau"
@@ -1367,6 +1350,12 @@ function OverviewSection() {
           }
           value={`${salesLast7} pcs`}
           accent="#5b7fff"
+        />
+        <StatCard
+          icon={AlertTriangle}
+          label="Toko Perlu Perhatian"
+          value={storesNeedAttention}
+          accent="#f87171"
         />
       </div>
 
@@ -1573,6 +1562,86 @@ function OverviewSection() {
             })}
           </div>
         </div>
+      </div>
+
+      {/* Kesehatan Toko */}
+      <div className="bg-panel border border-line rounded-xl p-5 mt-4">
+        <h3 className="text-sm font-medium text-neutral-400 mb-1 flex items-center gap-1.5">
+          <AlertTriangle size={14} className="text-red-400" />
+          Kesehatan Toko
+        </h3>
+        <p className="text-xs text-neutral-600 mb-4">
+          Perbandingan 7 hari terakhir vs 7 hari sebelumnya, per toko. Toko
+          dengan status "Kosong" atau "Turun" ditaruh paling atas.
+        </p>
+        {storeHealth.length === 0 ? (
+          <p className="text-neutral-500 text-sm text-center py-8">
+            Belum ada data toko
+          </p>
+        ) : (
+          <div className="space-y-2 max-h-[360px] overflow-y-auto">
+            {storeHealth.map((s) => {
+              const statusStyles: Record<
+                string,
+                { label: string; dot: string; text: string }
+              > = {
+                kosong: {
+                  label: "Kosong",
+                  dot: "bg-red-500",
+                  text: "text-red-400",
+                },
+                turun: {
+                  label: "Turun",
+                  dot: "bg-red-500",
+                  text: "text-red-400",
+                },
+                stabil: {
+                  label: "Stabil",
+                  dot: "bg-amber-400",
+                  text: "text-amber-400",
+                },
+                naik: {
+                  label: "Naik",
+                  dot: "bg-emerald-400",
+                  text: "text-emerald-400",
+                },
+              };
+              const style = statusStyles[s.status];
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-3 bg-black/20 border border-line/60 rounded-lg px-3.5 py-2.5"
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${style.dot} shrink-0`}
+                  ></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-neutral-200 truncate">
+                      {s.name}{" "}
+                      <span className="text-neutral-600">({s.code})</span>
+                    </p>
+                    <p className="text-[11px] text-neutral-500">
+                      Dikelola {s.managed_by}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-sm tabular-nums text-neutral-200">
+                      {s.current} pcs
+                    </p>
+                    <p className={`text-[11px] font-medium ${style.text}`}>
+                      {s.status === "kosong" && "Belum ada penjualan"}
+                      {s.status === "naik" &&
+                        s.changePct === null &&
+                        "Baru mulai jual"}
+                      {s.changePct !== null &&
+                        `${s.changePct > 0 ? "+" : ""}${s.changePct.toFixed(0)}% vs minggu lalu`}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
