@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Volume2, VolumeX } from "lucide-react";
 
 const AVATARS: Record<string, string> = {
   Hendi: "/avatars/hendi.png",
@@ -29,86 +28,37 @@ const GREETING_LINES = [
   "Good to have you back.",
 ];
 
-/** Ucapkan teks lewat Web Speech API bawaan browser (gratis, tanpa API tambahan). */
-function speakText(text: string, lang: string, onDone?: () => void) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-    onDone?.();
-    return;
-  }
-  window.speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = lang;
-  utter.pitch = 0.85;
-  utter.rate = 0.97;
-  const voices = window.speechSynthesis.getVoices();
-  const langPrefix = lang.slice(0, 2).toLowerCase();
-  const matchVoice = voices.find((v) =>
-    v.lang?.toLowerCase().startsWith(langPrefix),
-  );
-  if (matchVoice) utter.voice = matchVoice;
+type Greeting = {
+  displayName: string;
+  line: string;
+  path: string;
+};
 
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    onDone?.();
-  };
-  utter.onend = finish;
-  utter.onerror = finish;
-  window.speechSynthesis.speak(utter);
-  // Jaring pengaman kalau event onend tidak pernah terpanggil (beberapa browser)
-  setTimeout(finish, 8000);
-}
+// Berapa lama greeting tampil normal sebelum efek portal mulai
+const HOLD_MS = 700;
+// Durasi animasi portal (blur + zoom-out + flash)
+const PORTAL_MS = 650;
 
 export default function HomePage() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const [greeting, setGreeting] = useState<{
-    displayName: string;
-    line: string;
-  } | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
-  const [showSplash, setShowSplash] = useState(true);
-  const [splashLeaving, setSplashLeaving] = useState(false);
+  const [greeting, setGreeting] = useState<Greeting | null>(null);
+  const [portalLeaving, setPortalLeaving] = useState(false);
   const router = useRouter();
 
-  // Baca preferensi suara yang tersimpan
+  // Begitu greeting tampil: tunggu sebentar, mulai efek portal, lalu pindah halaman
   useEffect(() => {
-    const stored = localStorage.getItem("modiusSound");
-    if (stored === "off") setSoundOn(false);
-  }, []);
-
-  // Splash kredit tampil sebentar lalu menghilang
-  useEffect(() => {
-    const leaveTimer = setTimeout(() => setSplashLeaving(true), 1600);
-    const hideTimer = setTimeout(() => setShowSplash(false), 2100);
+    if (!greeting) return;
+    const zoomTimer = setTimeout(() => setPortalLeaving(true), HOLD_MS);
+    const navTimer = setTimeout(
+      () => router.push(greeting.path),
+      HOLD_MS + PORTAL_MS,
+    );
     return () => {
-      clearTimeout(leaveTimer);
-      clearTimeout(hideTimer);
+      clearTimeout(zoomTimer);
+      clearTimeout(navTimer);
     };
-  }, []);
-
-  // Sambutan suara begitu splash kredit selesai
-  useEffect(() => {
-    if (showSplash || !soundOn) return;
-    const trigger = () =>
-      speakText("Systems online. Welcome to Modius.", "en-US");
-    const voices = window.speechSynthesis?.getVoices() ?? [];
-    if (voices.length > 0) {
-      trigger();
-    } else if (window.speechSynthesis) {
-      window.speechSynthesis.onvoiceschanged = trigger;
-    }
-    return () => window.speechSynthesis?.cancel();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSplash]);
-
-  function toggleSound() {
-    const next = !soundOn;
-    setSoundOn(next);
-    localStorage.setItem("modiusSound", next ? "on" : "off");
-    if (!next) window.speechSynthesis?.cancel();
-  }
+  }, [greeting, router]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -126,51 +76,14 @@ export default function HomePage() {
 
     const line =
       GREETING_LINES[Math.floor(Math.random() * GREETING_LINES.length)];
-    setGreeting({ displayName: match.displayName, line });
-
-    let navigated = false;
-    const goToPage = () => {
-      if (navigated) return;
-      navigated = true;
-      router.push(match.path);
-    };
-
-    if (soundOn) {
-      // Suara mengikuti teks sambutan yang tampil di layar, navigasi baru
-      // jalan setelah suara selesai (plus jeda singkat biar nggak mepet)
-      speakText(`Welcome back, ${match.displayName}. ${line}`, "en-US", () =>
-        setTimeout(goToPage, 400),
-      );
-    } else {
-      setTimeout(goToPage, 1600);
-    }
+    setGreeting({ displayName: match.displayName, line, path: match.path });
   }
 
-  const soundButton = (
-    <button
-      onClick={toggleSound}
-      aria-label={soundOn ? "Matikan suara" : "Nyalakan suara"}
-      className="fixed top-5 right-5 z-20 w-9 h-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-neutral-400 hover:text-neutral-200 hover:bg-white/10 transition-colors"
-    >
-      {soundOn ? (
-        <Volume2 size={16} strokeWidth={1.75} />
-      ) : (
-        <VolumeX size={16} strokeWidth={1.75} />
-      )}
-    </button>
-  );
-
-  const creditSplash = showSplash && (
-    <div
-      className={`fixed inset-0 z-50 bg-[#0a0b0e] flex items-center justify-center px-4 transition-opacity duration-500 ${
-        splashLeaving ? "opacity-0 pointer-events-none" : "opacity-100"
-      }`}
-    >
-      <p className="splash-text text-center text-2xl sm:text-3xl font-semibold text-neutral-200">
-        Handcrafted with <span className="splash-heart inline-block">❤️</span>{" "}
-        by <span className="text-[#7c96ff]">Gita Dev Team</span>
-      </p>
-    </div>
+  const footer = (
+    <p className="fixed bottom-4 inset-x-0 z-10 text-center text-[11px] text-neutral-600 tracking-wide select-none">
+      Handcrafted with <span className="text-red-400">❤</span> by{" "}
+      <span className="text-[#7c96ff]">Gita Dev Team</span>
+    </p>
   );
 
   const backdrop = (
@@ -195,42 +108,6 @@ export default function HomePage() {
       }
       .animate-fadeIn {
         animation: fadeIn 0.4s ease-out forwards;
-      }
-
-      @keyframes splashIn {
-        from {
-          opacity: 0;
-          transform: scale(0.92) translateY(6px);
-        }
-        to {
-          opacity: 1;
-          transform: scale(1) translateY(0);
-        }
-      }
-      .splash-text {
-        animation: splashIn 0.6s cubic-bezier(0.19, 1, 0.22, 1) forwards;
-      }
-
-      @keyframes heartBeat {
-        0%,
-        100% {
-          transform: scale(1);
-        }
-        15% {
-          transform: scale(1.3);
-        }
-        30% {
-          transform: scale(1);
-        }
-        45% {
-          transform: scale(1.18);
-        }
-        60% {
-          transform: scale(1);
-        }
-      }
-      .splash-heart {
-        animation: heartBeat 1.4s ease-in-out infinite;
       }
 
       @keyframes fadeInUp {
@@ -370,30 +247,85 @@ export default function HomePage() {
         animation-delay: -7s;
         opacity: 0.14;
       }
+
+      /* --- Efek portal saat pindah halaman --- */
+      @keyframes portalZoomOut {
+        0% {
+          opacity: 1;
+          transform: scale(1);
+          filter: blur(0px);
+        }
+        100% {
+          opacity: 0;
+          transform: scale(0.72);
+          filter: blur(14px);
+        }
+      }
+      .portal-leaving .portal-content {
+        animation: portalZoomOut ${PORTAL_MS}ms cubic-bezier(0.4, 0, 0.2, 1)
+          forwards;
+      }
+
+      @keyframes portalFlash {
+        0% {
+          opacity: 0;
+          transform: scale(0.8);
+        }
+        45% {
+          opacity: 0.85;
+          transform: scale(1.4);
+        }
+        100% {
+          opacity: 0;
+          transform: scale(2.2);
+        }
+      }
+      .portal-flash {
+        position: fixed;
+        inset: 0;
+        z-index: 40;
+        pointer-events: none;
+        opacity: 0;
+        background: radial-gradient(
+          circle,
+          rgba(140, 170, 255, 0.9),
+          rgba(91, 127, 255, 0.25) 45%,
+          transparent 72%
+        );
+      }
+      .portal-leaving .portal-flash {
+        animation: portalFlash ${PORTAL_MS}ms ease-out forwards;
+      }
     `}</style>
   );
 
   if (greeting) {
     return (
-      <div className="min-h-screen bg-[#0a0b0e] text-white flex flex-col items-center justify-center px-4 relative">
+      <div
+        className={`min-h-screen bg-[#0a0b0e] text-white flex flex-col items-center justify-center px-4 relative ${
+          portalLeaving ? "portal-leaving" : ""
+        }`}
+      >
         {backdrop}
-        {soundButton}
-        <div className="relative logo-shine rounded-3xl">
-          <div className="logo-glow" />
-          <img
-            src={AVATARS[greeting.displayName] || "/logo.png"}
-            alt={greeting.displayName}
-            className={`w-28 h-28 mb-6 animate-fadeIn ${
-              AVATARS[greeting.displayName]
-                ? "rounded-full object-cover"
-                : "object-contain"
-            }`}
-          />
+        <div className="portal-flash" />
+        <div className="portal-content flex flex-col items-center">
+          <div className="relative logo-shine rounded-3xl">
+            <div className="logo-glow" />
+            <img
+              src={AVATARS[greeting.displayName] || "/logo.png"}
+              alt={greeting.displayName}
+              className={`w-28 h-28 mb-6 animate-fadeIn ${
+                AVATARS[greeting.displayName]
+                  ? "rounded-full object-cover"
+                  : "object-contain"
+              }`}
+            />
+          </div>
+          <p className="text-2xl font-semibold mb-2 animate-fadeIn">
+            Welcome back, {greeting.displayName}
+          </p>
+          <p className="text-neutral-500 animate-fadeIn">{greeting.line}</p>
         </div>
-        <p className="text-2xl font-semibold mb-2 animate-fadeIn">
-          Welcome back, {greeting.displayName}
-        </p>
-        <p className="text-neutral-500 animate-fadeIn">{greeting.line}</p>
         {styles}
       </div>
     );
@@ -401,9 +333,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-[#0a0b0e] text-white flex items-center justify-center px-4 relative">
-      {creditSplash}
       {backdrop}
-      {soundButton}
       <form onSubmit={handleSubmit} className="w-full max-w-sm relative">
         <div className="relative logo-shine rounded-3xl w-fit mx-auto mb-8">
           <div className="logo-glow" />
@@ -448,6 +378,7 @@ export default function HomePage() {
           Masuk
         </button>
       </form>
+      {footer}
       {styles}
     </div>
   );
