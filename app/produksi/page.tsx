@@ -11,9 +11,9 @@ type Product = {
 };
 
 function getStockStatus(qty: number) {
-  if (qty <= 60)
+  if (qty <= 50)
     return { label: "Stok Kritis!", color: "bg-red-500", text: "text-red-600" };
-  if (qty <= 120)
+  if (qty <= 100)
     return {
       label: "Stok Menipis",
       color: "bg-yellow-500",

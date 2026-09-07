@@ -1236,8 +1236,8 @@ function OverviewSection() {
         kritis = 0;
       const list = stockData.map((s: any) => {
         const qty = s.available_qty;
-        if (qty <= 60) kritis++;
-        else if (qty <= 120) menipis++;
+        if (qty <= 50) kritis++;
+        else if (qty <= 100) menipis++;
         else aman++;
         return {
           full_name: s.products?.full_name ?? "?",
