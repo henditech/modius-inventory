@@ -17,6 +17,8 @@ import {
   ChevronDown,
   TrendingUp,
   Flame,
+  Menu,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -541,7 +543,7 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
 
       <StatusBanner message={message} />
 
-      <div className="grid grid-cols-[1fr_320px] gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
         {/* KIRI: form + grid produk */}
         <div>
           <div className="bg-panel border border-line rounded-xl p-5 mb-6 flex items-end gap-4 flex-wrap">
@@ -624,7 +626,7 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
             Pilih Produk
           </label>
           <div className="max-h-[62vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {products.map((p) => {
                 const isSelected = selectedProduct === p.id;
                 return (
@@ -662,7 +664,7 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
         </div>
 
         {/* KANAN: riwayat penjualan + kalender */}
-        <div className="bg-panel border border-line rounded-xl p-4 sticky top-20">
+        <div className="bg-panel border border-line rounded-xl p-4 lg:sticky lg:top-20">
           <h3 className="text-sm tracking-wide text-neutral-300 font-medium mb-3 flex items-center gap-1.5">
             <ClipboardList size={15} strokeWidth={1.75} />
             {isToday ? "Penjualan Hari Ini" : "Penjualan"}
@@ -920,7 +922,7 @@ function CatatReturSection({ currentUser }: { currentUser: string }) {
 
       <StatusBanner message={message} />
 
-      <div className="grid grid-cols-[1fr_320px] gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
         {/* KIRI: form + grid produk */}
         <div>
           <div className="bg-panel border border-line rounded-xl p-5 mb-6 flex items-end gap-4 flex-wrap">
@@ -1016,7 +1018,7 @@ function CatatReturSection({ currentUser }: { currentUser: string }) {
             Pilih Produk
           </label>
           <div className="max-h-[62vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {products.map((p) => {
                 const isSelected = selectedProduct === p.id;
                 return (
@@ -1054,7 +1056,7 @@ function CatatReturSection({ currentUser }: { currentUser: string }) {
         </div>
 
         {/* KANAN: riwayat retur + kalender */}
-        <div className="bg-panel border border-line rounded-xl p-4 sticky top-20">
+        <div className="bg-panel border border-line rounded-xl p-4 lg:sticky lg:top-20">
           <h3 className="text-sm tracking-wide text-neutral-300 font-medium mb-3 flex items-center gap-1.5">
             <ClipboardList size={15} strokeWidth={1.75} />
             {isToday ? "Retur Hari Ini" : "Retur"}
@@ -1102,7 +1104,7 @@ function CatatReturSection({ currentUser }: { currentUser: string }) {
   );
 }
 
-function OverviewSection() {
+function OverviewSection({ currentUser }: { currentUser: string }) {
   const [stockSummary, setStockSummary] = useState({
     aman: 0,
     menipis: 0,
@@ -1137,7 +1139,7 @@ function OverviewSection() {
 
   useEffect(() => {
     loadOverview(overviewDate);
-  }, [overviewDate]);
+  }, [overviewDate, currentUser]);
 
   async function loadStockSummary() {
     // Dibaca dari view product_available_stock, bukan tabel stock mentah --
@@ -1190,7 +1192,7 @@ function OverviewSection() {
     end.setDate(end.getDate() + 1);
     end.setHours(0, 0, 0, 0);
 
-    const { data: salesData } = await supabase
+    const { data: rawSalesData } = await supabase
       .from("sales")
       .select(
         "quantity, sold_at, store_id, products(full_name), stores(name, code, managed_by)",
@@ -1198,10 +1200,19 @@ function OverviewSection() {
       .gte("sold_at", start.toISOString())
       .lt("sold_at", end.toISOString());
 
-    const { data: allStores } = await supabase
+    const { data: rawStores } = await supabase
       .from("stores")
       .select("id, name, code, managed_by")
       .order("code");
+
+    // Overview di-scope per admin: masing-masing cuma lihat toko yang dia
+    // kelola sendiri, biar fokus dan gak campur sama toko admin lain.
+    const allStores = (rawStores ?? []).filter(
+      (s: any) => s.managed_by === currentUser,
+    );
+    const salesData = (rawSalesData ?? []).filter(
+      (s: any) => s.stores?.managed_by === currentUser,
+    );
 
     const sevenDaysAgo = new Date(reference);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
@@ -1328,7 +1339,7 @@ function OverviewSection() {
       </h2>
 
       {/* Kartu ringkasan */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
         <StatCard
           icon={Package}
           label="Total Produk Dipantau"
@@ -1345,16 +1356,16 @@ function OverviewSection() {
           icon={TrendingUp}
           label={
             isOverviewToday
-              ? "Terjual 7 Hari Terakhir"
-              : `Terjual 7 Hari s.d. ${shortLabel(overviewDate)}`
+              ? "Terjual 7 Hari Terakhir (Toko Kamu)"
+              : `Terjual 7 Hari s.d. ${shortLabel(overviewDate)} (Toko Kamu)`
           }
           value={`${salesLast7} pcs`}
           accent="#5b7fff"
         />
         <StatCard
           icon={AlertTriangle}
-          label="Toko Perlu Perhatian"
-          value={storesNeedAttention}
+          label="Toko Kamu Perlu Perhatian"
+          value={`${storesNeedAttention} / ${storeHealth.length}`}
           accent="#f87171"
         />
       </div>
@@ -1386,11 +1397,11 @@ function OverviewSection() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1.6fr_1fr] gap-4 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 mb-6">
         {/* Tren penjualan */}
         <div className="bg-panel border border-line rounded-xl p-5">
           <h3 className="text-sm font-medium text-neutral-400 mb-4">
-            Tren Penjualan {rangeDaysCount} Hari Terakhir (gabungan semua toko)
+            Tren Penjualan {rangeDaysCount} Hari Terakhir (toko kamu)
           </h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -1473,12 +1484,12 @@ function OverviewSection() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[1.6fr_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
         {/* Produk terlaris */}
         <div className="bg-panel border border-line rounded-xl p-5">
           <h3 className="text-sm font-medium text-neutral-400 mb-4 flex items-center gap-1.5">
             <Flame size={14} className="text-red-400" />
-            Produk Terlaris ({rangeDaysCount} Hari Terakhir)
+            Produk Terlaris Toko Kamu ({rangeDaysCount} Hari Terakhir)
           </h3>
           {topProductsChartData.length === 0 ? (
             <p className="text-neutral-500 text-sm text-center py-8">
@@ -1530,118 +1541,65 @@ function OverviewSection() {
           )}
         </div>
 
-        {/* Daftar stok detail */}
+        {/* Kesehatan toko (toko yang currentUser kelola sendiri) */}
         <div className="bg-panel border border-line rounded-xl p-5">
-          <h3 className="text-sm font-medium text-neutral-400 mb-4">
-            Daftar Stok
+          <h3 className="text-sm font-medium text-neutral-400 mb-1 flex items-center gap-1.5">
+            <AlertTriangle size={14} className="text-red-400" />
+            Kesehatan Toko Kamu
           </h3>
-          <div className="space-y-2 max-h-[280px] overflow-y-auto">
-            {stockList.map((s, i) => {
-              const dot =
-                s.qty <= 60
-                  ? "bg-red-500"
-                  : s.qty <= 120
-                    ? "bg-amber-400"
-                    : "bg-emerald-400";
-              return (
-                <div
-                  key={i}
-                  className="flex items-center gap-2.5 bg-black/20 border border-line/60 rounded-lg px-3 py-2"
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${dot} shrink-0`}
-                  ></span>
-                  <span className="text-xs text-neutral-300 truncate flex-1">
-                    {s.full_name}
-                  </span>
-                  <span className="text-xs text-neutral-500 tabular-nums">
-                    {s.qty} pcs
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Kesehatan Toko */}
-      <div className="bg-panel border border-line rounded-xl p-5 mt-4">
-        <h3 className="text-sm font-medium text-neutral-400 mb-1 flex items-center gap-1.5">
-          <AlertTriangle size={14} className="text-red-400" />
-          Kesehatan Toko
-        </h3>
-        <p className="text-xs text-neutral-600 mb-4">
-          Perbandingan 7 hari terakhir vs 7 hari sebelumnya, per toko. Toko
-          dengan status "Kosong" atau "Turun" ditaruh paling atas.
-        </p>
-        {storeHealth.length === 0 ? (
-          <p className="text-neutral-500 text-sm text-center py-8">
-            Belum ada data toko
+          <p className="text-[11px] text-neutral-600 mb-4">
+            7 hari terakhir vs 7 hari sebelumnya. "Kosong"/"Turun" di atas.
           </p>
-        ) : (
-          <div className="space-y-2 max-h-[360px] overflow-y-auto">
-            {storeHealth.map((s) => {
-              const statusStyles: Record<
-                string,
-                { label: string; dot: string; text: string }
-              > = {
-                kosong: {
-                  label: "Kosong",
-                  dot: "bg-red-500",
-                  text: "text-red-400",
-                },
-                turun: {
-                  label: "Turun",
-                  dot: "bg-red-500",
-                  text: "text-red-400",
-                },
-                stabil: {
-                  label: "Stabil",
-                  dot: "bg-amber-400",
-                  text: "text-amber-400",
-                },
-                naik: {
-                  label: "Naik",
-                  dot: "bg-emerald-400",
-                  text: "text-emerald-400",
-                },
-              };
-              const style = statusStyles[s.status];
-              return (
-                <div
-                  key={s.id}
-                  className="flex items-center gap-3 bg-black/20 border border-line/60 rounded-lg px-3.5 py-2.5"
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${style.dot} shrink-0`}
-                  ></span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-neutral-200 truncate">
-                      {s.name}{" "}
-                      <span className="text-neutral-600">({s.code})</span>
-                    </p>
-                    <p className="text-[11px] text-neutral-500">
-                      Dikelola {s.managed_by}
-                    </p>
+          {storeHealth.length === 0 ? (
+            <p className="text-neutral-500 text-sm text-center py-8">
+              Belum ada toko yang kamu kelola
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-[280px] overflow-y-auto">
+              {storeHealth.map((s) => {
+                const statusStyles: Record<
+                  string,
+                  { dot: string; text: string }
+                > = {
+                  kosong: { dot: "bg-red-500", text: "text-red-400" },
+                  turun: { dot: "bg-red-500", text: "text-red-400" },
+                  stabil: { dot: "bg-amber-400", text: "text-amber-400" },
+                  naik: { dot: "bg-emerald-400", text: "text-emerald-400" },
+                };
+                const style = statusStyles[s.status];
+                return (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-2.5 bg-black/20 border border-line/60 rounded-lg px-3 py-2"
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${style.dot} shrink-0`}
+                    ></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-neutral-200 truncate">
+                        {s.name}{" "}
+                        <span className="text-neutral-600">({s.code})</span>
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs tabular-nums text-neutral-300">
+                        {s.current} pcs
+                      </p>
+                      <p className={`text-[10px] font-medium ${style.text}`}>
+                        {s.status === "kosong" && "Belum ada penjualan"}
+                        {s.status === "naik" &&
+                          s.changePct === null &&
+                          "Baru mulai jual"}
+                        {s.changePct !== null &&
+                          `${s.changePct > 0 ? "+" : ""}${s.changePct.toFixed(0)}%`}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm tabular-nums text-neutral-200">
-                      {s.current} pcs
-                    </p>
-                    <p className={`text-[11px] font-medium ${style.text}`}>
-                      {s.status === "kosong" && "Belum ada penjualan"}
-                      {s.status === "naik" &&
-                        s.changePct === null &&
-                        "Baru mulai jual"}
-                      {s.changePct !== null &&
-                        `${s.changePct > 0 ? "+" : ""}${s.changePct.toFixed(0)}% vs minggu lalu`}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1725,12 +1683,12 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
       <StatusBanner message={message} />
 
       {/* Tab dimensi */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-6 overflow-x-auto pb-1 -mx-1 px-1">
         {MASTER_TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === t.id
                 ? "bg-accent-500 text-white"
                 : "bg-panel border border-line text-neutral-400 hover:text-neutral-200"
@@ -1741,13 +1699,13 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
         ))}
       </div>
 
-      <div className="grid grid-cols-[1fr_300px] gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
         {/* Daftar item yang sudah ada */}
         <div>
           <h3 className="text-sm text-neutral-500 font-medium mb-3">
             {currentTab.label} yang sudah ada ({items.length})
           </h3>
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             {items.map((item) => (
               <div
                 key={item.id}
@@ -1773,7 +1731,7 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
         </div>
 
         {/* Form tambah baru */}
-        <div className="bg-panel border border-line rounded-xl p-5 sticky top-20">
+        <div className="bg-panel border border-line rounded-xl p-5 lg:sticky lg:top-20">
           <h3 className="text-sm font-medium text-neutral-300 mb-4">
             Tambah {currentTab.label} Baru
           </h3>
@@ -1839,6 +1797,7 @@ export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<Section>("overview");
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
   const [qcPendingCount, setQcPendingCount] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -1970,18 +1929,27 @@ export default function AdminPage() {
       `}</style>
 
       {/* Header */}
-      <div className="bg-panel/80 backdrop-blur-sm border-b border-line px-8 py-4 flex items-center justify-between sticky top-0 z-10">
-        <h1 className="text-lg font-semibold tracking-tight flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-accent-500"></span>
-          Modius Admin
-        </h1>
-        <div className="flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 rounded-lg border border-line">
+      <div className="bg-panel/80 backdrop-blur-sm border-b border-line px-4 md:px-8 py-4 flex items-center justify-between sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setMobileNavOpen(true)}
+            className="md:hidden -ml-1 p-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
+            aria-label="Buka menu"
+          >
+            <Menu size={20} strokeWidth={1.75} />
+          </button>
+          <h1 className="text-base md:text-lg font-semibold tracking-tight flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-accent-500 shrink-0"></span>
+            Modius Admin
+          </h1>
+        </div>
+        <div className="flex items-center gap-2.5 pl-1.5 pr-2 md:pr-3 py-1.5 rounded-lg border border-line">
           <img
             src={AVATARS[currentUser]}
             alt={currentUser}
             className="w-7 h-7 rounded-full object-cover"
           />
-          <span className="text-left leading-tight">
+          <span className="text-left leading-tight hidden sm:block">
             <span className="block text-sm font-medium text-neutral-100">
               {currentUser}
             </span>
@@ -1993,8 +1961,33 @@ export default function AdminPage() {
       </div>
 
       <div className="flex">
-        {/* Sidebar Navigasi */}
-        <div className="w-60 bg-panel/50 border-r border-line min-h-[calc(100vh-65px)] p-4">
+        {/* Overlay gelap saat drawer mobile terbuka */}
+        {mobileNavOpen && (
+          <div
+            onClick={() => setMobileNavOpen(false)}
+            className="fixed inset-0 bg-black/60 z-40 md:hidden"
+          />
+        )}
+
+        {/* Sidebar Navigasi: drawer di mobile, statis di desktop */}
+        <div
+          className={`fixed md:static top-0 left-0 h-full md:h-auto w-64 md:w-60 bg-panel md:bg-panel/50 border-r border-line md:min-h-[calc(100vh-65px)] p-4 z-50 transform transition-transform duration-300 ease-out ${
+            mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+          } md:translate-x-0`}
+        >
+          <div className="flex items-center justify-between mb-4 md:hidden">
+            <span className="text-sm font-semibold text-neutral-200 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-accent-500"></span>
+              Modius Admin
+            </span>
+            <button
+              onClick={() => setMobileNavOpen(false)}
+              className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-white/5"
+              aria-label="Tutup menu"
+            >
+              <X size={18} strokeWidth={1.75} />
+            </button>
+          </div>
           <nav className="space-y-1">
             {SECTIONS.map((s) => {
               const Icon = s.icon;
@@ -2002,7 +1995,10 @@ export default function AdminPage() {
               return (
                 <button
                   key={s.id}
-                  onClick={() => setActiveSection(s.id)}
+                  onClick={() => {
+                    setActiveSection(s.id);
+                    setMobileNavOpen(false);
+                  }}
                   className={`w-full text-left px-3 py-2.5 rounded-r-lg text-sm font-medium transition-colors duration-200 flex items-center justify-between gap-2.5 border-l-2 ${
                     active
                       ? "bg-accent-500/10 text-neutral-50 border-accent-500"
@@ -2031,8 +2027,10 @@ export default function AdminPage() {
         </div>
 
         {/* Konten */}
-        <div className="flex-1 p-8">
-          {activeSection === "overview" && <OverviewSection />}
+        <div className="flex-1 p-4 md:p-8 min-w-0">
+          {activeSection === "overview" && (
+            <OverviewSection currentUser={currentUser} />
+          )}
           {activeSection === "qc" && (
             <QcCheckpointSection
               currentUser={currentUser}
