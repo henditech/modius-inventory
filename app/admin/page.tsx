@@ -1986,13 +1986,13 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
           <h3 className="text-sm text-neutral-500 font-medium mb-3">
             Produk yang sudah ada ({existingProducts.length})
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[560px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2 max-h-[560px] overflow-y-auto pr-1">
             {existingProducts.map((p) => (
               <div
                 key={p.id}
                 className="bg-panel border border-line rounded-lg overflow-hidden"
               >
-                <div className="aspect-square bg-black/30">
+                <div className="aspect-video bg-black/30">
                   {p.photo_url && (
                     <img
                       src={p.photo_url}
@@ -2001,11 +2001,13 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
                     />
                   )}
                 </div>
-                <div className="p-2.5">
-                  <p className="text-xs text-neutral-200 truncate">
+                <div className="p-2">
+                  <p className="text-[11px] text-neutral-200 truncate">
                     {p.full_name}
                   </p>
-                  <p className="text-[11px] text-neutral-500 mt-0.5">{p.sku}</p>
+                  <p className="text-[10px] text-neutral-500 mt-0.5 truncate">
+                    {p.sku}
+                  </p>
                 </div>
               </div>
             ))}
