@@ -1513,13 +1513,16 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
                   />
                   <YAxis
                     type="category"
-                    dataKey="short"
+                    dataKey="name"
                     stroke="#6b7280"
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                     width={200}
                     tick={{ fill: "#e5e7eb" }}
+                    tickFormatter={(value: string) =>
+                      value.length > 26 ? value.slice(0, 24) + "…" : value
+                    }
                   />
                   <Tooltip
                     {...CHART_TOOLTIP_STYLE}
