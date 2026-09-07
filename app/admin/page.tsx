@@ -474,11 +474,19 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
 
     const { data: salesData } = await supabase
       .from("sales")
-      .select("quantity, sold_at, sold_by, products(full_name), stores(code)")
+      .select(
+        "quantity, sold_at, sold_by, products(full_name), stores(code, managed_by)",
+      )
       .gte("sold_at", start)
       .lt("sold_at", end)
       .order("sold_at", { ascending: false });
-    setSalesHistory(salesData ?? []);
+
+    // Sama seperti Overview: tiap admin cuma lihat penjualan dari toko
+    // yang dia kelola sendiri, biar fokus & gak campur sama toko admin lain.
+    const scoped = (salesData ?? []).filter(
+      (s: any) => s.stores?.managed_by === currentUser,
+    );
+    setSalesHistory(scoped);
   }
 
   useEffect(() => {
@@ -487,7 +495,7 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
 
   useEffect(() => {
     loadSalesHistory(historyDate);
-  }, [historyDate]);
+  }, [historyDate, currentUser]);
 
   function flash(text: string, type: FlashType = "success") {
     setMessage({ text, type });
