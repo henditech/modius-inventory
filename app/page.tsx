@@ -44,7 +44,60 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [greeting, setGreeting] = useState<Greeting | null>(null);
   const [portalLeaving, setPortalLeaving] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [showIOSHint, setShowIOSHint] = useState(false);
   const router = useRouter();
+
+  // Deteksi & tangkap tombol install PWA.
+  // - Android/Chrome: browser nembak event "beforeinstallprompt" yang kita
+  //   tahan dulu (preventDefault) supaya bisa dipicu manual lewat tombol kita.
+  // - iOS Safari: gak ada event kayak gitu sama sekali, jadi kalau iOS &
+  //   belum "terinstall", kita tetap munculin tombol tapi isinya instruksi
+  //   manual (tap Share > Add to Home Screen).
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as any).standalone === true;
+    if (standalone) return; // udah keinstall, gak perlu tombol lagi
+
+    const iOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+    setIsIOS(iOS);
+    if (iOS) setShowInstallBtn(true);
+
+    function handleBeforeInstallPrompt(e: Event) {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setShowInstallBtn(true);
+    }
+    function handleAppInstalled() {
+      setShowInstallBtn(false);
+      setInstallPrompt(null);
+    }
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+    return () => {
+      window.removeEventListener(
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt,
+      );
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  async function handleInstallClick() {
+    if (isIOS) {
+      setShowIOSHint(true);
+      return;
+    }
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+    setShowInstallBtn(false);
+  }
 
   // Begitu greeting tampil: tunggu sebentar, mulai efek portal, lalu pindah halaman
   useEffect(() => {
@@ -84,6 +137,54 @@ export default function HomePage() {
       Handcrafted with <span className="text-red-400">❤</span> by{" "}
       <span className="text-[#7c96ff]">Gita Dev Team</span>
     </p>
+  );
+
+  const installButton = showInstallBtn && (
+    <div className="fixed top-4 right-4 z-30">
+      <button
+        onClick={handleInstallClick}
+        className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/15 backdrop-blur-sm text-white text-xs font-medium px-3 py-2 rounded-full transition-colors"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        Install App
+      </button>
+
+      {showIOSHint && (
+        <div className="absolute right-0 mt-2 w-64 bg-[#15161c] border border-neutral-700 rounded-xl p-4 text-xs text-neutral-300 shadow-xl animate-fadeIn">
+          <p className="font-medium text-white mb-1.5">
+            Cara install di iPhone:
+          </p>
+          <ol className="list-decimal list-inside space-y-1 text-neutral-400">
+            <li>
+              Tap tombol <span className="text-white">Share</span> (kotak dengan
+              panah ke atas) di Safari
+            </li>
+            <li>
+              Pilih <span className="text-white">Add to Home Screen</span>
+            </li>
+          </ol>
+          <button
+            onClick={() => setShowIOSHint(false)}
+            className="mt-3 text-neutral-500 hover:text-neutral-300"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+    </div>
   );
 
   const backdrop = (
@@ -307,6 +408,7 @@ export default function HomePage() {
         }`}
       >
         {backdrop}
+        {installButton}
         <div className="portal-flash" />
         <div className="portal-content flex flex-col items-center">
           <div className="relative logo-shine rounded-3xl">
@@ -334,6 +436,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-[#0a0b0e] text-white flex items-center justify-center px-4 relative">
       {backdrop}
+      {installButton}
       <form onSubmit={handleSubmit} className="w-full max-w-sm relative">
         <div className="relative logo-shine rounded-3xl w-fit mx-auto mb-8">
           <div className="logo-glow" />
