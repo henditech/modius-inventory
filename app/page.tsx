@@ -134,8 +134,11 @@ export default function HomePage() {
 
   const footer = (
     <p className="fixed bottom-4 inset-x-0 z-10 text-center text-[11px] text-neutral-600 tracking-wide select-none">
-      Handcrafted with <span className="text-red-400">❤</span> by{" "}
-      <span className="text-[#7c96ff]">Gita Dev Team</span>
+      Proudly built for{" "}
+      <span className="text-[#7c96ff] font-medium hover:text-[#9cbdff] hover:drop-shadow-[0_0_4px_rgba(156,189,255,0.5)] transition-all duration-300 cursor-pointer">
+        Gita
+      </span>{" "}
+      & Modius Internal Inventory © 2026
     </p>
   );
 
