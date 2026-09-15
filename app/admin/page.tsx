@@ -1379,22 +1379,25 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
   // di bawah, di dalam render list).
   const TOP_RANK_STYLE = [
     {
-      ring: "ring-amber-400/70",
-      bar: "from-amber-300 to-amber-500",
+      ring: "ring-cyan-400/70",
+      bar: "from-cyan-400 via-sky-500 to-blue-600",
+      glow: "shadow-[0_0_10px_rgba(56,189,248,0.5)]",
       badge: "\u{1F451}", // 👑
-      num: "text-amber-400",
+      num: "bg-gradient-to-r from-cyan-300 to-blue-400 bg-clip-text text-transparent",
     },
     {
-      ring: "ring-neutral-300/50",
-      bar: "from-neutral-300 to-neutral-400",
+      ring: "ring-fuchsia-400/60",
+      bar: "from-fuchsia-400 to-purple-600",
+      glow: "shadow-[0_0_8px_rgba(232,121,249,0.4)]",
       badge: null,
-      num: "text-neutral-300",
+      num: "bg-gradient-to-r from-fuchsia-300 to-purple-400 bg-clip-text text-transparent",
     },
     {
-      ring: "ring-orange-400/50",
-      bar: "from-orange-400 to-orange-600",
+      ring: "ring-emerald-400/60",
+      bar: "from-emerald-400 to-teal-600",
+      glow: "shadow-[0_0_8px_rgba(52,211,153,0.4)]",
       badge: null,
-      num: "text-orange-400",
+      num: "bg-gradient-to-r from-emerald-300 to-teal-400 bg-clip-text text-transparent",
     },
   ];
 
@@ -1572,24 +1575,45 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
                   const style = TOP_RANK_STYLE[i] ?? {
                     ring: "ring-line",
                     bar: "from-accent-500 to-accent-400",
+                    glow: "",
                     badge: null,
                     num: "text-neutral-600",
                   };
-                  // Tren naik: qty 7 hari terakhir minimal 20% lebih tinggi
-                  // dari 7 hari sebelumnya -- ambang sama kayak status
-                  // "naik" di Kesehatan Toko, biar konsisten satu dashboard.
                   const isTrending =
                     p.previous > 0 && p.current > p.previous * 1.2;
 
                   return (
                     <div key={i} className="flex items-center gap-3">
                       <span
-                        className={`text-xs font-semibold w-4 text-right shrink-0 ${style.num}`}
+                        className={`text-base font-extrabold w-5 text-right shrink-0 ${style.num}`}
                       >
                         {i + 1}
                       </span>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-xs text-neutral-200 truncate flex items-center gap-1.5">
+                            {p.name}
+                            {isTrending && (
+                              <span className="shrink-0 text-[10px] bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded-full font-medium">
+                                🔥 Naik
+                              </span>
+                            )}
+                          </p>
+                          <span className="text-xs tabular-nums text-neutral-300 shrink-0">
+                            {p.qty} pcs
+                          </span>
+                        </div>
+                        <div className="h-2.5 bg-black/30 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full bg-gradient-to-r ${style.bar} ${style.glow} rounded-full transition-all duration-700`}
+                            style={{ width: `${(p.qty / maxQty) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+
                       <div
-                        className={`relative w-10 h-10 rounded-lg bg-black/30 overflow-hidden shrink-0 ring-2 ${style.ring}`}
+                        className={`relative w-16 aspect-video rounded-lg bg-black/30 overflow-hidden shrink-0 ring-2 ${style.ring}`}
                       >
                         {p.photo_url && (
                           <img
@@ -1604,25 +1628,6 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
                           </span>
                         )}
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs text-neutral-200 truncate mb-1 flex items-center gap-1.5">
-                          {p.name}
-                          {isTrending && (
-                            <span className="shrink-0 text-[10px] bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded-full font-medium">
-                              🔥 Naik
-                            </span>
-                          )}
-                        </p>
-                        <div className="h-1.5 bg-black/30 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full bg-gradient-to-r ${style.bar} rounded-full transition-all duration-700`}
-                            style={{ width: `${(p.qty / maxQty) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-xs tabular-nums text-neutral-300 shrink-0">
-                        {p.qty} pcs
-                      </span>
                     </div>
                   );
                 });
