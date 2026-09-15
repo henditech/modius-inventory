@@ -1626,10 +1626,14 @@ const MASTER_TABS = [
 ] as const;
 
 const PRODUCT_TAB = { id: "produk", label: "Produk" } as const;
+const MAPPINGS_TAB = { id: "mappings", label: "Mappings" } as const;
 
 const ALL_TABS = [...MASTER_TABS, PRODUCT_TAB];
 
-type MasterTabId = (typeof MASTER_TABS)[number]["id"] | typeof PRODUCT_TAB.id;
+type MasterTabId =
+  | (typeof MASTER_TABS)[number]["id"]
+  | typeof PRODUCT_TAB.id
+  | typeof MAPPINGS_TAB.id;
 
 function MasterDataSection({ currentUser }: { currentUser: string }) {
   const [activeTab, setActiveTab] = useState<MasterTabId>("model");
@@ -1720,6 +1724,8 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
 
       {activeTab === "produk" ? (
         <ProductFormSection currentUser={currentUser} />
+      ) : activeTab === "mappings" ? (
+        <MappingsSection />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6 items-start">
           {/* Daftar item yang sudah ada */}
@@ -2147,6 +2153,263 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
           <p className="text-[11px] text-neutral-600 mt-3">
             Ditambahkan oleh {currentUser}. SKU & nama otomatis terisi dari
             pilihan di atas, tapi bisa diedit sebelum disimpan.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type SimpleProduct = {
+  id: string;
+  sku: string;
+  full_name: string;
+  photo_url: string | null;
+};
+
+type SimpleStore = { id: string; name: string; code: string };
+
+type MappingRow = { id: string; marketplace_product_name: string };
+
+function MappingsSection() {
+  const [products, setProducts] = useState<SimpleProduct[]>([]);
+  const [stores, setStores] = useState<SimpleStore[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<SimpleProduct | null>(
+    null,
+  );
+  const [selectedStoreId, setSelectedStoreId] = useState("");
+  const [existingMappings, setExistingMappings] = useState<MappingRow[]>([]);
+  const [namesText, setNamesText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<FlashMessage | null>(null);
+
+  function flash(text: string, type: FlashType = "success") {
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 3000);
+  }
+
+  async function loadProducts() {
+    const { data } = await supabase
+      .from("products")
+      .select("id, sku, full_name, photo_url")
+      .eq("is_active", true)
+      .order("full_name");
+    setProducts(data ?? []);
+  }
+
+  async function loadStores() {
+    const { data } = await supabase
+      .from("stores")
+      .select("id, name, code")
+      .order("code");
+    setStores(data ?? []);
+  }
+
+  useEffect(() => {
+    loadProducts();
+    loadStores();
+  }, []);
+
+  // Tiap kali produk ATAU toko yang dipilih berubah, tarik ulang daftar
+  // nama alias yang udah pernah dipetakan buat kombinasi itu -- biar
+  // kelihatan apa yang udah kepetakan, gak numpuk kerja dobel.
+  async function loadExistingMappings(productId: string, storeId: string) {
+    if (!productId || !storeId) {
+      setExistingMappings([]);
+      return;
+    }
+    const { data } = await supabase
+      .from("sku_mappings")
+      .select("id, marketplace_product_name")
+      .eq("product_id", productId)
+      .eq("store_id", storeId)
+      .eq("marketplace_sku", "");
+    setExistingMappings(data ?? []);
+  }
+
+  useEffect(() => {
+    if (selectedProduct && selectedStoreId) {
+      loadExistingMappings(selectedProduct.id, selectedStoreId);
+    } else {
+      setExistingMappings([]);
+    }
+  }, [selectedProduct, selectedStoreId]);
+
+  async function handleRemoveMapping(mappingId: string) {
+    await supabase.from("sku_mappings").delete().eq("id", mappingId);
+    if (selectedProduct) {
+      loadExistingMappings(selectedProduct.id, selectedStoreId);
+    }
+  }
+
+  async function handleMapNames() {
+    if (!selectedProduct) {
+      flash("Pilih dulu produk aslinya (klik salah satu foto)", "warning");
+      return;
+    }
+    if (!selectedStoreId) {
+      flash("Pilih toko dulu", "warning");
+      return;
+    }
+    const names = namesText
+      .split("\n")
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (names.length === 0) {
+      flash("Tempel minimal 1 nama produk dulu", "warning");
+      return;
+    }
+
+    setSaving(true);
+    let success = 0;
+    let skipped = 0;
+    for (const name of names) {
+      const { error } = await supabase.from("sku_mappings").insert({
+        store_id: selectedStoreId,
+        marketplace_sku: "",
+        marketplace_variasi: "",
+        marketplace_product_name: name,
+        product_id: selectedProduct.id,
+      });
+      if (error) {
+        skipped++; // kemungkinan besar udah pernah dipetakan sebelumnya
+      } else {
+        success++;
+      }
+    }
+    setSaving(false);
+    flash(
+      `${success} nama berhasil dipetakan` +
+        (skipped > 0 ? `, ${skipped} dilewati (mungkin udah ada)` : ""),
+      success > 0 ? "success" : "warning",
+    );
+    setNamesText("");
+    loadExistingMappings(selectedProduct.id, selectedStoreId);
+  }
+
+  return (
+    <div>
+      <StatusBanner message={message} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 items-start">
+        {/* Grid foto produk -- klik buat pilih "ini barangnya" */}
+        <div>
+          <h3 className="text-sm text-neutral-500 font-medium mb-3">
+            Pilih produk asli ({products.length})
+          </h3>
+          <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2 max-h-[560px] overflow-y-auto pr-1">
+            {products.map((p) => {
+              const isSelected = selectedProduct?.id === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedProduct(p)}
+                  className={`text-left bg-panel border rounded-lg overflow-hidden transition-colors ${
+                    isSelected
+                      ? "border-accent-500 ring-2 ring-accent-500/50"
+                      : "border-line hover:border-neutral-500"
+                  }`}
+                >
+                  <div className="aspect-video bg-black/30">
+                    {p.photo_url && (
+                      <img
+                        src={p.photo_url}
+                        alt={p.full_name}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                  </div>
+                  <div className="p-2">
+                    <p className="text-[11px] text-neutral-200 truncate">
+                      {p.full_name}
+                    </p>
+                    <p className="text-[10px] text-neutral-500 mt-0.5 truncate">
+                      {p.sku}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Panel pemetaan */}
+        <div className="bg-panel border border-line rounded-xl p-5 lg:sticky lg:top-20">
+          <h3 className="text-sm font-medium text-neutral-300 mb-1">
+            Petakan Nama Marketplace
+          </h3>
+          <p className="text-xs text-neutral-500 mb-4">
+            {selectedProduct
+              ? `Produk terpilih: ${selectedProduct.full_name} (${selectedProduct.sku})`
+              : "Klik salah satu foto di sebelah kiri dulu"}
+          </p>
+
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            Toko
+          </label>
+          <select
+            value={selectedStoreId}
+            onChange={(e) => setSelectedStoreId(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm mb-3 focus:outline-none focus:border-accent-500"
+          >
+            <option value="">— pilih toko —</option>
+            {stores.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.code})
+              </option>
+            ))}
+          </select>
+
+          {existingMappings.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-neutral-400 font-medium mb-1.5">
+                Nama yang sudah dipetakan ({existingMappings.length})
+              </p>
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {existingMappings.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center justify-between gap-2 bg-black/30 rounded px-2 py-1.5"
+                  >
+                    <span className="text-xs text-neutral-300 truncate">
+                      {m.marketplace_product_name}
+                    </span>
+                    <button
+                      onClick={() => handleRemoveMapping(m.id)}
+                      className="text-neutral-500 hover:text-red-400 text-xs shrink-0"
+                    >
+                      Hapus
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
+            Tempel nama produk dari Shopee (1 baris = 1 nama)
+          </label>
+          <textarea
+            value={namesText}
+            onChange={(e) => setNamesText(e.target.value)}
+            placeholder={
+              "TOPI BASEBALL HITAM BORDIR PREMIUM\nTopi baseball hitam bordir mds distro\nTOPI KEREN BORDIR HITAM MDS ORIGINAL"
+            }
+            rows={6}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-xs mb-3 focus:outline-none focus:border-accent-500 font-mono"
+          />
+
+          <button
+            onClick={handleMapNames}
+            disabled={saving}
+            className="shine-btn w-full bg-accent-500 hover:bg-accent-400 disabled:opacity-60 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95"
+          >
+            {saving ? "Menyimpan..." : "Petakan Semua Nama"}
+          </button>
+
+          <p className="text-[11px] text-neutral-600 mt-3">
+            Dipakai buat toko yang SKU/Variasi-nya kosong di Shopee -- tiap nama
+            beda-beda tetap boleh nunjuk ke produk yang sama.
           </p>
         </div>
       </div>

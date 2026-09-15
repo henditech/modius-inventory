@@ -50,12 +50,6 @@ export default function HomePage() {
   const [showIOSHint, setShowIOSHint] = useState(false);
   const router = useRouter();
 
-  // Deteksi & tangkap tombol install PWA.
-  // - Android/Chrome: browser nembak event "beforeinstallprompt" yang kita
-  //   tahan dulu (preventDefault) supaya bisa dipicu manual lewat tombol kita.
-  // - iOS Safari: gak ada event kayak gitu sama sekali, jadi kalau iOS &
-  //   belum "terinstall", kita tetap munculin tombol tapi isinya instruksi
-  //   manual (tap Share > Add to Home Screen).
   useEffect(() => {
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
