@@ -1628,7 +1628,7 @@ const MASTER_TABS = [
 const PRODUCT_TAB = { id: "produk", label: "Produk" } as const;
 const MAPPINGS_TAB = { id: "mappings", label: "Mappings" } as const;
 
-const ALL_TABS = [...MASTER_TABS, PRODUCT_TAB];
+const ALL_TABS = [...MASTER_TABS, PRODUCT_TAB, MAPPINGS_TAB];
 
 type MasterTabId =
   | (typeof MASTER_TABS)[number]["id"]
