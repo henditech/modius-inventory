@@ -1122,7 +1122,13 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
   });
   const [trend, setTrend] = useState<{ date: string; total: number }[]>([]);
   const [topProducts, setTopProducts] = useState<
-    { name: string; qty: number }[]
+    {
+      name: string;
+      photo_url: string | null;
+      qty: number;
+      current: number;
+      previous: number;
+    }[]
   >([]);
   const [stockList, setStockList] = useState<
     { full_name: string; photo_url: string | null; qty: number }[]
@@ -1202,10 +1208,13 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     end.setDate(end.getDate() + 1);
     end.setHours(0, 0, 0, 0);
 
+    // Sertakan products(id, full_name, photo_url) -- id dipakai buat
+    // ngelompokkan penjualan per produk secara aman (bukan per nama teks),
+    // photo_url dipakai buat tampilan ranking foto di Produk Terlaris.
     const { data: rawSalesData } = await supabase
       .from("sales")
       .select(
-        "quantity, sold_at, store_id, products(full_name), stores(name, code, managed_by)",
+        "quantity, sold_at, store_id, products(id, full_name, photo_url), stores(name, code, managed_by)",
       )
       .gte("sold_at", start.toISOString())
       .lt("sold_at", end.toISOString());
@@ -1217,6 +1226,10 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
 
     // Overview di-scope per admin: masing-masing cuma lihat toko yang dia
     // kelola sendiri, biar fokus dan gak campur sama toko admin lain.
+    // Filter ini jadi sumber tunggal untuk SEMUA ringkasan di bawah --
+    // trend, produk terlaris, dan kesehatan toko -- karena semuanya
+    // dihitung dari salesData & allStores yang sama-sama udah difilter
+    // di sini, bukan dihitung ulang per bagian.
     const allStores = (rawStores ?? []).filter(
       (s: any) => s.managed_by === currentUser,
     );
@@ -1229,7 +1242,16 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
     let last7Total = 0;
-    const byProduct: Record<string, number> = {};
+    const byProduct: Record<
+      string,
+      {
+        name: string;
+        photo_url: string | null;
+        qty: number;
+        current: number;
+        previous: number;
+      }
+    > = {};
     const byStore: Record<string, { current: number; previous: number }> = {};
 
     (salesData ?? []).forEach((s: any) => {
@@ -1244,8 +1266,25 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
         last7Total += s.quantity;
       }
 
+      // Dikelompokkan per product_id (bukan per nama teks) -- lebih aman
+      // kalau suatu saat ada 2 produk beda dengan nama yang kebetulan
+      // sama/mirip. photo_url ikut disimpan sekali di sini, dan current
+      // vs previous dihitung bareng qty total, dipakai buat badge "Naik".
+      const productId = s.products?.id ?? "unknown";
       const name = s.products?.full_name ?? "?";
-      byProduct[name] = (byProduct[name] || 0) + s.quantity;
+      const photoUrl = s.products?.photo_url ?? null;
+      if (!byProduct[productId]) {
+        byProduct[productId] = {
+          name,
+          photo_url: photoUrl,
+          qty: 0,
+          current: 0,
+          previous: 0,
+        };
+      }
+      byProduct[productId].qty += s.quantity;
+      if (isCurrentPeriod) byProduct[productId].current += s.quantity;
+      else byProduct[productId].previous += s.quantity;
 
       if (s.store_id) {
         if (!byStore[s.store_id])
@@ -1258,8 +1297,7 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     setTrend(days.map((d) => ({ date: d.key, total: d.total })));
     setSalesLast7(last7Total);
 
-    const ranked = Object.entries(byProduct)
-      .map(([name, qty]) => ({ name, qty }))
+    const ranked = Object.values(byProduct)
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 5);
     setTopProducts(ranked);
@@ -1336,10 +1374,29 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     }),
   }));
 
-  const topProductsChartData = topProducts.map((p) => ({
-    ...p,
-    short: p.name.length > 26 ? p.name.slice(0, 24) + "…" : p.name,
-  }));
+  // Gaya visual buat 3 besar di ranking Produk Terlaris -- emas, perak,
+  // perunggu. Produk peringkat 4 ke bawah pakai gaya netral (fallback
+  // di bawah, di dalam render list).
+  const TOP_RANK_STYLE = [
+    {
+      ring: "ring-amber-400/70",
+      bar: "from-amber-300 to-amber-500",
+      badge: "\u{1F451}", // 👑
+      num: "text-amber-400",
+    },
+    {
+      ring: "ring-neutral-300/50",
+      bar: "from-neutral-300 to-neutral-400",
+      badge: null,
+      num: "text-neutral-300",
+    },
+    {
+      ring: "ring-orange-400/50",
+      bar: "from-orange-400 to-orange-600",
+      badge: null,
+      num: "text-orange-400",
+    },
+  ];
 
   return (
     <div className="animate-fadeIn">
@@ -1495,61 +1552,81 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
-        {/* Produk terlaris */}
+        {/* Produk terlaris -- ranking bergaya "leaderboard": foto produk,
+            ring warna emas/perak/perunggu buat 3 besar, mini bar progress,
+            dan badge tren naik dibanding 7 hari sebelumnya. */}
         <div className="bg-panel border border-line rounded-xl p-5">
           <h3 className="text-sm font-medium text-neutral-400 mb-4 flex items-center gap-1.5">
             <Flame size={14} className="text-red-400" />
             Produk Terlaris Toko Kamu ({rangeDaysCount} Hari Terakhir)
           </h3>
-          {topProductsChartData.length === 0 ? (
+          {topProducts.length === 0 ? (
             <p className="text-neutral-500 text-sm text-center py-8">
               Belum ada penjualan di periode ini
             </p>
           ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={topProductsChartData}
-                  layout="vertical"
-                  margin={{ left: 10 }}
-                >
-                  <XAxis
-                    type="number"
-                    stroke="#6b7280"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDecimals={false}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    stroke="#6b7280"
-                    fontSize={11}
-                    tickLine={false}
-                    axisLine={false}
-                    width={200}
-                    tick={{ fill: "#e5e7eb" }}
-                    tickFormatter={(value: string) =>
-                      value.length > 26 ? value.slice(0, 24) + "…" : value
-                    }
-                  />
-                  <Tooltip
-                    {...CHART_TOOLTIP_STYLE}
-                    cursor={{ fill: "rgba(91,127,255,0.08)" }}
-                    formatter={(value) => [`${value} pcs`, "Terjual"]}
-                    labelFormatter={(_label, payload) =>
-                      payload?.[0]?.payload?.name ?? ""
-                    }
-                  />
-                  <Bar
-                    dataKey="qty"
-                    fill="#5b7fff"
-                    radius={[0, 6, 6, 0]}
-                    barSize={16}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="space-y-3">
+              {(() => {
+                const maxQty = Math.max(...topProducts.map((p) => p.qty), 1);
+                return topProducts.map((p, i) => {
+                  const style = TOP_RANK_STYLE[i] ?? {
+                    ring: "ring-line",
+                    bar: "from-accent-500 to-accent-400",
+                    badge: null,
+                    num: "text-neutral-600",
+                  };
+                  // Tren naik: qty 7 hari terakhir minimal 20% lebih tinggi
+                  // dari 7 hari sebelumnya -- ambang sama kayak status
+                  // "naik" di Kesehatan Toko, biar konsisten satu dashboard.
+                  const isTrending =
+                    p.previous > 0 && p.current > p.previous * 1.2;
+
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <span
+                        className={`text-xs font-semibold w-4 text-right shrink-0 ${style.num}`}
+                      >
+                        {i + 1}
+                      </span>
+                      <div
+                        className={`relative w-10 h-10 rounded-lg bg-black/30 overflow-hidden shrink-0 ring-2 ${style.ring}`}
+                      >
+                        {p.photo_url && (
+                          <img
+                            src={p.photo_url}
+                            alt={p.name}
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                        {style.badge && (
+                          <span className="absolute -top-1.5 -right-1.5 text-xs">
+                            {style.badge}
+                          </span>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs text-neutral-200 truncate mb-1 flex items-center gap-1.5">
+                          {p.name}
+                          {isTrending && (
+                            <span className="shrink-0 text-[10px] bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded-full font-medium">
+                              🔥 Naik
+                            </span>
+                          )}
+                        </p>
+                        <div className="h-1.5 bg-black/30 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full bg-gradient-to-r ${style.bar} rounded-full transition-all duration-700`}
+                            style={{ width: `${(p.qty / maxQty) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <span className="text-xs tabular-nums text-neutral-300 shrink-0">
+                        {p.qty} pcs
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
         </div>
