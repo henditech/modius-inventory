@@ -2270,11 +2270,16 @@ function MappingsSection() {
     let success = 0;
     let skipped = 0;
     for (const line of lines) {
-      // "Nama Produk|Variasi" -- bagian variasi opsional. Enter = baris
-      // baru = produk baru; "|" cuma misah nama & variasi DALAM 1 baris.
-      const [rawName, rawVariasi] = line.split("|");
-      const name = normalize(rawName ?? "");
-      const variasi = normalize(rawVariasi ?? "");
+      // "Nama Produk||Variasi" -- pemisahnya DUA pipe nempel, bukan satu,
+      // soalnya nama produk asli (judul listing seller) kadang emang
+      // ngandung 1 pipe berdiri sendiri (mis. "... | Bordir Timbul ...").
+      // Dua pipe nempel praktis gak pernah muncul natural, jadi aman
+      // dipakai sebagai pemisah sengaja.
+      const sepIndex = line.indexOf("||");
+      const rawName = sepIndex === -1 ? line : line.slice(0, sepIndex);
+      const rawVariasi = sepIndex === -1 ? "" : line.slice(sepIndex + 2);
+      const name = normalize(rawName);
+      const variasi = normalize(rawVariasi);
       if (!name) {
         skipped++;
         continue;
@@ -2288,7 +2293,7 @@ function MappingsSection() {
         product_id: selectedProduct.id,
       });
       if (error) {
-        skipped++; // kemungkinan besar kombinasi nama+variasi ini udah ada
+        skipped++;
       } else {
         success++;
       }
@@ -2415,7 +2420,7 @@ function MappingsSection() {
             value={namesText}
             onChange={(e) => setNamesText(e.target.value)}
             placeholder={
-              "TOPI BASEBALL HITAM BORDIR PREMIUM\nTopi baseball hitam bordir mds distro\nTopi Pria Trucker Kulit Motif Crocodile Distro Jaring Premium Logo PIN BESI Hitam|Border MDS"
+              "TOPI BASEBALL HITAM BORDIR PREMIUM\nTopi Hitam Korean Style | Baseball Cap Cowok Premium Kulit | Bordir Timbul Distro Look\nTopi Pria Trucker Kulit Motif Crocodile Distro Jaring Premium Logo PIN BESI Hitam||Border MDS"
             }
             rows={6}
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-xs mb-3 focus:outline-none focus:border-accent-500 font-mono"
