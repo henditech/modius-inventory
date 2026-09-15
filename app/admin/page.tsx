@@ -2169,7 +2169,15 @@ type SimpleProduct = {
 
 type SimpleStore = { id: string; name: string; code: string };
 
-type MappingRow = { id: string; marketplace_product_name: string };
+type MappingRow = {
+  id: string;
+  marketplace_product_name: string;
+  marketplace_variasi: string;
+};
+
+function normalize(text: string) {
+  return text.trim().replace(/\s+/g, " ");
+}
 
 function MappingsSection() {
   const [products, setProducts] = useState<SimpleProduct[]>([]);
@@ -2210,20 +2218,18 @@ function MappingsSection() {
     loadStores();
   }, []);
 
-  // Tiap kali produk ATAU toko yang dipilih berubah, tarik ulang daftar
-  // nama alias yang udah pernah dipetakan buat kombinasi itu -- biar
-  // kelihatan apa yang udah kepetakan, gak numpuk kerja dobel.
   async function loadExistingMappings(productId: string, storeId: string) {
     if (!productId || !storeId) {
       setExistingMappings([]);
       return;
     }
+    // Filter "marketplace_sku=''" udah gak relevan -- SKU gak lagi
+    // dipakai buat matching, jadi gak perlu dibedain lagi.
     const { data } = await supabase
       .from("sku_mappings")
-      .select("id, marketplace_product_name")
+      .select("id, marketplace_product_name, marketplace_variasi")
       .eq("product_id", productId)
-      .eq("store_id", storeId)
-      .eq("marketplace_sku", "");
+      .eq("store_id", storeId);
     setExistingMappings(data ?? []);
   }
 
@@ -2251,11 +2257,11 @@ function MappingsSection() {
       flash("Pilih toko dulu", "warning");
       return;
     }
-    const names = namesText
+    const lines = namesText
       .split("\n")
-      .map((n) => n.trim())
+      .map((l) => l.trim())
       .filter(Boolean);
-    if (names.length === 0) {
+    if (lines.length === 0) {
       flash("Tempel minimal 1 nama produk dulu", "warning");
       return;
     }
@@ -2263,16 +2269,26 @@ function MappingsSection() {
     setSaving(true);
     let success = 0;
     let skipped = 0;
-    for (const name of names) {
+    for (const line of lines) {
+      // "Nama Produk|Variasi" -- bagian variasi opsional. Enter = baris
+      // baru = produk baru; "|" cuma misah nama & variasi DALAM 1 baris.
+      const [rawName, rawVariasi] = line.split("|");
+      const name = normalize(rawName ?? "");
+      const variasi = normalize(rawVariasi ?? "");
+      if (!name) {
+        skipped++;
+        continue;
+      }
+
       const { error } = await supabase.from("sku_mappings").insert({
         store_id: selectedStoreId,
         marketplace_sku: "",
-        marketplace_variasi: "",
+        marketplace_variasi: variasi,
         marketplace_product_name: name,
         product_id: selectedProduct.id,
       });
       if (error) {
-        skipped++; // kemungkinan besar udah pernah dipetakan sebelumnya
+        skipped++; // kemungkinan besar kombinasi nama+variasi ini udah ada
       } else {
         success++;
       }
@@ -2373,6 +2389,12 @@ function MappingsSection() {
                   >
                     <span className="text-xs text-neutral-300 truncate">
                       {m.marketplace_product_name}
+                      {m.marketplace_variasi && (
+                        <span className="text-neutral-500">
+                          {" "}
+                          — {m.marketplace_variasi}
+                        </span>
+                      )}
                     </span>
                     <button
                       onClick={() => handleRemoveMapping(m.id)}
@@ -2393,7 +2415,7 @@ function MappingsSection() {
             value={namesText}
             onChange={(e) => setNamesText(e.target.value)}
             placeholder={
-              "TOPI BASEBALL HITAM BORDIR PREMIUM\nTopi baseball hitam bordir mds distro\nTOPI KEREN BORDIR HITAM MDS ORIGINAL"
+              "TOPI BASEBALL HITAM BORDIR PREMIUM\nTopi baseball hitam bordir mds distro\nTopi Pria Trucker Kulit Motif Crocodile Distro Jaring Premium Logo PIN BESI Hitam|Border MDS"
             }
             rows={6}
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-xs mb-3 focus:outline-none focus:border-accent-500 font-mono"
