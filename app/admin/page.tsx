@@ -594,10 +594,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
               <img
                 src={s.products.photo_url}
                 alt={s.products?.full_name}
-                className="w-14 h-14 rounded-lg object-cover shrink-0"
+                className="w-24 aspect-video rounded-lg object-cover shrink-0"
               />
             ) : (
-              <div className="w-14 h-14 rounded-lg bg-black/30 flex items-center justify-center shrink-0">
+              <div className="w-24 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
                 <Package
                   size={18}
                   strokeWidth={1.5}
