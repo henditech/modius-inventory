@@ -21,6 +21,7 @@ import {
   X,
   ImagePlus,
   Loader2,
+  Search,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -430,37 +431,18 @@ function StoreSelect({
   );
 }
 
-function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
-  const [products, setProducts] = useState<ProductOption[]>([]);
+function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   const [stores, setStores] = useState<StoreOption[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState("");
-  const [selectedStore, setSelectedStore] = useState("");
-  const [quantity, setQuantity] = useState(0);
-  const [message, setMessage] = useState<FlashMessage | null>(null);
-  const [historyDate, setHistoryDate] = useState(todayStr());
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState(shiftDateStr(todayStr(), -7));
+  const [dateTo, setDateTo] = useState(todayStr());
+  const [storeFilter, setStoreFilter] = useState("");
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
-  const [transactionDate, setTransactionDate] = useState(todayStr());
+  const [limit, setLimit] = useState(50);
+  const [loading, setLoading] = useState(false);
+  const [copiedResi, setCopiedResi] = useState<string | null>(null);
 
-  async function loadProductsAndStores() {
-    // Dibaca dari view product_available_stock, bukan tabel stock mentah --
-    // supaya produk tipe "tempel" (topi polos + pin) juga tampil dengan
-    // angka stok yang benar (dihitung dari stok komponennya), bukan 0/stale.
-    const { data: productData } = await supabase
-      .from("product_available_stock")
-      .select("product_id, full_name, photo_url, available_qty")
-      .eq("is_active", true)
-      .order("full_name");
-    if (productData) {
-      setProducts(
-        productData.map((p: any) => ({
-          id: p.product_id,
-          full_name: p.full_name,
-          photo_url: p.photo_url,
-          stock_qty: p.available_qty ?? 0,
-        })),
-      );
-    }
-
+  async function loadStores() {
     const { data: storeData } = await supabase
       .from("stores")
       .select("id, name, code, managed_by")
@@ -468,260 +450,223 @@ function CatatPenjualanSection({ currentUser }: { currentUser: string }) {
     if (storeData) setStores(storeData);
   }
 
-  async function loadSalesHistory(date: string) {
-    const start = `${date}T00:00:00`;
-    const nextDay = new Date(date);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const end = `${nextDay.toISOString().split("T")[0]}T00:00:00`;
+  async function loadSalesHistory() {
+    setLoading(true);
+    const start = `${dateFrom}T00:00:00`;
+    const endDate = new Date(dateTo);
+    endDate.setDate(endDate.getDate() + 1);
+    const end = `${endDate.toISOString().split("T")[0]}T00:00:00`;
 
-    const { data: salesData } = await supabase
+    const { data } = await supabase
       .from("sales")
       .select(
-        "quantity, sold_at, sold_by, products(full_name), stores(code, managed_by)",
+        "quantity, sold_at, sold_by, resi_number, products(full_name, photo_url), stores(code, name, managed_by)",
       )
       .gte("sold_at", start)
       .lt("sold_at", end)
-      .order("sold_at", { ascending: false });
+      .order("sold_at", { ascending: false })
+      .limit(limit);
 
-    // Sama seperti Overview: tiap admin cuma lihat penjualan dari toko
-    // yang dia kelola sendiri, biar fokus & gak campur sama toko admin lain.
-    const scoped = (salesData ?? []).filter(
+    // Tiap admin cuma lihat penjualan dari toko yang dia kelola sendiri --
+    // sama persis polanya kayak Overview & versi lama halaman ini.
+    const scoped = (data ?? []).filter(
       (s: any) => s.stores?.managed_by === currentUser,
     );
     setSalesHistory(scoped);
+    setLoading(false);
   }
 
   useEffect(() => {
-    loadProductsAndStores();
+    loadStores();
   }, []);
 
   useEffect(() => {
-    loadSalesHistory(historyDate);
-  }, [historyDate, currentUser]);
+    loadSalesHistory();
+  }, [dateFrom, dateTo, limit, currentUser]);
 
-  function flash(text: string, type: FlashType = "success") {
-    setMessage({ text, type });
-    setTimeout(() => setMessage(null), 2500);
+  function copyResi(resi: string) {
+    navigator.clipboard.writeText(resi);
+    setCopiedResi(resi);
+    setTimeout(() => setCopiedResi(null), 1500);
   }
 
-  async function handleSave() {
-    if (!selectedProduct || !selectedStore || quantity <= 0) {
-      flash("Pilih toko, produk, dan jumlah dulu", "warning");
-      return;
-    }
-
-    const productData = products.find((p) => p.id === selectedProduct);
-    if (!productData || productData.stock_qty < quantity) {
-      flash("Stok tidak cukup!", "error");
-      return;
-    }
-
-    // Cukup catat transaksi penjualannya di sini. Pengurangan stok produk,
-    // pin (untuk produk tempel), dan SEMUA bahan pelengkap sudah ditangani
-    // otomatis oleh trigger database begitu baris sales ini masuk --
-    // jangan duplikasi logika pengurangan stok manual di sini lagi.
-    const { error } = await supabase.from("sales").insert({
-      product_id: selectedProduct,
-      store_id: selectedStore,
-      quantity,
-      sold_by: currentUser,
-      sold_at: `${transactionDate}T12:00:00`,
-    });
-
-    if (error) {
-      flash("Gagal simpan, coba lagi", "error");
-      return;
-    }
-
-    flash("Penjualan tersimpan!", "success");
-    setQuantity(0);
-    setSelectedProduct("");
-    loadProductsAndStores();
-    setTransactionDate(todayStr());
-    if (historyDate === transactionDate) loadSalesHistory(historyDate);
-  }
-
-  const selectedProductData = products.find((p) => p.id === selectedProduct);
-  const isToday = historyDate === todayStr();
   const myStores = stores.filter((s: any) => s.managed_by === currentUser);
+
+  const filteredHistory = salesHistory.filter((s) => {
+    if (storeFilter && s.stores?.code !== storeFilter) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (s.resi_number ?? "").toLowerCase().includes(q) ||
+      (s.products?.full_name ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const totalQty = filteredHistory.reduce((sum, s) => sum + s.quantity, 0);
+
   return (
     <div className="animate-fadeIn">
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
         <span className="w-2 h-2 rounded-full bg-accent-400"></span>
-        Catat Penjualan
+        Catatan Penjualan
       </h2>
 
-      <StatusBanner message={message} />
+      {/* Search resi/produk -- elemen paling menonjol, sesuai use case utama */}
+      <div className="relative mb-4">
+        <Search
+          size={16}
+          strokeWidth={1.75}
+          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cari nomor resi atau nama produk..."
+          className="w-full bg-panel border border-line rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+        />
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
-        {/* KIRI: form + grid produk */}
-        <div>
-          <div className="bg-panel border border-line rounded-xl p-5 mb-6 flex items-end gap-4 flex-wrap">
-            <div className="min-w-[180px]">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-                <Store
-                  size={13}
-                  strokeWidth={1.75}
-                  className="text-neutral-500"
-                />
-                Toko
-              </label>
-              <StoreSelect
-                stores={myStores}
-                value={selectedStore}
-                onChange={setSelectedStore}
+      {/* Filter tanggal & toko */}
+      <div className="bg-panel border border-line rounded-xl p-4 mb-4 flex items-end gap-4 flex-wrap">
+        <div className="w-36">
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium">
+            Dari Tanggal
+          </label>
+          <input
+            type="date"
+            value={dateFrom}
+            max={dateTo}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70"
+          />
+        </div>
+        <div className="w-36">
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium">
+            Sampai Tanggal
+          </label>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom}
+            max={todayStr()}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70"
+          />
+        </div>
+        <div className="min-w-[200px] flex-1">
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
+            <Store size={13} strokeWidth={1.75} className="text-neutral-500" />
+            Toko
+          </label>
+          <select
+            value={storeFilter}
+            onChange={(e) => setStoreFilter(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+          >
+            <option value="">Semua Toko Saya</option>
+            {myStores.map((s: any) => (
+              <option key={s.id} value={s.code}>
+                {s.code} — {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {filteredHistory.length > 0 && (
+        <div className="bg-accent-500/10 border border-accent-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-neutral-300">
+          <span className="text-accent-400 font-semibold tabular-nums">
+            {totalQty} pcs
+          </span>{" "}
+          dari {filteredHistory.length} transaksi
+        </div>
+      )}
+
+      {/* List transaksi */}
+      <div className="space-y-2">
+        {filteredHistory.map((s, i) => (
+          <div
+            key={i}
+            className="bg-panel border border-line rounded-xl p-3 flex items-center gap-3 hover:border-accent-500/50 transition-colors duration-200"
+          >
+            {s.products?.photo_url ? (
+              <img
+                src={s.products.photo_url}
+                alt={s.products?.full_name}
+                className="w-14 h-14 rounded-lg object-cover shrink-0"
               />
-            </div>
-
-            <div className="w-36">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium">
-                Tanggal
-              </label>
-              <input
-                type="date"
-                value={transactionDate}
-                max={todayStr()}
-                onChange={(e) => setTransactionDate(e.target.value)}
-                className="w-full bg-black/40 border border-accent-500/40 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-              />
-            </div>
-
-            <div className="min-w-[180px] flex-1">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
+            ) : (
+              <div className="w-14 h-14 rounded-lg bg-black/30 flex items-center justify-center shrink-0">
                 <Package
-                  size={13}
-                  strokeWidth={1.75}
-                  className="text-neutral-500"
+                  size={18}
+                  strokeWidth={1.5}
+                  className="text-neutral-600"
                 />
-                Produk dipilih
-              </label>
-              <div className="bg-black/20 border border-line/60 rounded-lg px-3 py-2.5 text-sm text-neutral-300 truncate">
-                {selectedProductData
-                  ? selectedProductData.full_name
-                  : "— klik foto di bawah —"}
               </div>
-            </div>
+            )}
 
-            <div className="w-24">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-                <Hash
-                  size={13}
-                  strokeWidth={1.75}
-                  className="text-neutral-500"
-                />
-                Jumlah
-              </label>
-              <input
-                type="number"
-                value={quantity || ""}
-                onChange={(e) => setQuantity(Number(e.target.value))}
-                className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-              />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-neutral-100 truncate">
+                {s.products?.full_name ?? "(produk tidak ditemukan)"}
+              </p>
+              <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 flex-wrap">
+                <span className="text-neutral-300 font-medium">
+                  {s.quantity} pcs
+                </span>
+                <span>·</span>
+                <span>{s.stores?.code}</span>
+                <span>·</span>
+                <span>
+                  {new Date(s.sold_at).toLocaleString("id-ID", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
             </div>
 
             <button
-              onClick={handleSave}
-              className="shine-btn bg-accent-500 hover:bg-accent-400 text-white px-6 py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95 whitespace-nowrap"
+              onClick={() => s.resi_number && copyResi(s.resi_number)}
+              className="shrink-0 text-right group"
+              title="Klik untuk salin nomor resi"
             >
-              Simpan Penjualan
+              <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
+                {copiedResi === s.resi_number ? "Tersalin!" : "No. Resi"}
+              </p>
+              <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
+                {s.resi_number ?? "-"}
+              </p>
             </button>
           </div>
+        ))}
 
-          <label className="text-sm text-neutral-300 mb-3 font-medium flex items-center gap-1.5">
-            <Package
-              size={15}
-              strokeWidth={1.75}
-              className="text-neutral-500"
-            />
-            Pilih Produk
-          </label>
-          <div className="max-h-[62vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {products.map((p) => {
-                const isSelected = selectedProduct === p.id;
-                return (
-                  <div key={p.id} className="group relative">
-                    <div className="absolute -inset-1.5 rounded-2xl bg-white/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                    <button
-                      onClick={() => setSelectedProduct(p.id)}
-                      className={`relative w-full text-left bg-panel border rounded-xl overflow-hidden transition-all duration-300 group-hover:-translate-y-0.5 ${
-                        isSelected
-                          ? "border-accent-500 ring-2 ring-accent-500/40"
-                          : "border-line group-hover:border-neutral-500"
-                      }`}
-                    >
-                      {p.photo_url && (
-                        <img
-                          src={p.photo_url}
-                          alt={p.full_name}
-                          className="w-full aspect-video object-cover"
-                        />
-                      )}
-                      <div className="p-2">
-                        <p className="text-xs text-neutral-300 truncate">
-                          {p.full_name}
-                        </p>
-                        <p className="text-[11px] text-neutral-500">
-                          {p.stock_qty} pcs
-                        </p>
-                      </div>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        {!loading && filteredHistory.length === 0 && (
+          <p className="text-neutral-500 text-sm text-center py-10">
+            {search
+              ? "Tidak ada transaksi yang cocok dengan pencarian"
+              : "Belum ada penjualan di rentang tanggal ini"}
+          </p>
+        )}
 
-        {/* KANAN: riwayat penjualan + kalender */}
-        <div className="bg-panel border border-line rounded-xl p-4 lg:sticky lg:top-20">
-          <h3 className="text-sm tracking-wide text-neutral-300 font-medium mb-3 flex items-center gap-1.5">
-            <ClipboardList size={15} strokeWidth={1.75} />
-            {isToday ? "Penjualan Hari Ini" : "Penjualan"}
-          </h3>
-
-          <input
-            type="date"
-            value={historyDate}
-            max={todayStr()}
-            onChange={(e) => setHistoryDate(e.target.value)}
-            className="w-full bg-black/40 border border-accent-500/40 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-          />
-
-          {salesHistory.length > 0 && (
-            <div className="bg-accent-500/10 border border-accent-500/20 rounded-lg px-3 py-2 mb-3 text-xs text-neutral-300">
-              <span className="text-accent-400 font-semibold tabular-nums">
-                {salesHistory.reduce((sum, s) => sum + s.quantity, 0)} pcs
-              </span>{" "}
-              stok berkurang dari {salesHistory.length} transaksi
-            </div>
-          )}
-
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {salesHistory.map((s, i) => (
-              <div
-                key={i}
-                className="bg-black/20 border border-line/60 rounded-lg px-3 py-2.5 text-xs"
-              >
-                <p className="text-neutral-200 truncate">
-                  {s.products?.full_name}
-                </p>
-                <div className="mt-1 text-neutral-500">
-                  <span className="text-neutral-300 font-medium">
-                    {s.quantity} pcs
-                  </span>{" "}
-                  ({s.stores?.code})
-                </div>
-              </div>
-            ))}
-            {salesHistory.length === 0 && (
-              <p className="text-neutral-500 text-sm text-center py-6">
-                Belum ada penjualan{isToday ? " hari ini" : " di tanggal ini"}
-              </p>
-            )}
-          </div>
-        </div>
+        {loading && (
+          <p className="text-neutral-500 text-sm text-center py-10 flex items-center justify-center gap-2">
+            <Loader2 size={14} className="animate-spin" />
+            Memuat...
+          </p>
+        )}
       </div>
+
+      {!loading && salesHistory.length === limit && (
+        <button
+          onClick={() => setLimit((l) => l + 50)}
+          className="w-full mt-4 py-2.5 rounded-lg border border-line text-sm text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 transition-colors"
+        >
+          Muat lebih banyak
+        </button>
+      )}
     </div>
   );
 }
@@ -2771,7 +2716,7 @@ export default function AdminPage() {
             />
           )}
           {activeSection === "sales" && (
-            <CatatPenjualanSection currentUser={currentUser} />
+            <CatatanPenjualanSection currentUser={currentUser} />
           )}
           {activeSection === "returns" && (
             <CatatReturSection currentUser={currentUser} />
