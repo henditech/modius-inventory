@@ -21,13 +21,17 @@ export const metadata: Metadata = {
   description: "Sistem pengelola stok dan produksi Modius.id",
   manifest: "/manifest.json",
   themeColor: "#0a0b0e",
+  other: {
+    google: "notranslate",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      lang="id"
+      translate="no"
+      className={`notranslate ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body
         className={`min-h-full flex flex-col ${inter.variable} ${sora.variable}`}

@@ -2502,7 +2502,7 @@ function MappingsSection() {
             value={namesText}
             onChange={(e) => setNamesText(e.target.value)}
             placeholder={
-              "TOPI BASEBALL HITAM BORDIR PREMIUM\nTopi Hitam Korean Style | Baseball Cap Cowok Premium Kulit | Bordir Timbul Distro Look\nTopi Pria Trucker Kulit Motif Crocodile Distro Jaring Premium Logo PIN BESI Hitam||Border MDS"
+              "Satu baris satu produk, kalau ada variasi pakai || untuk memisahkan nama produk dan variasi ya"
             }
             rows={6}
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-xs mb-3 focus:outline-none focus:border-accent-500 font-mono"
