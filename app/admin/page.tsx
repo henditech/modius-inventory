@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   LayoutDashboard,
+  Boxes,
   ShieldCheck,
   Wallet,
   Undo2,
@@ -40,7 +41,13 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabase";
 
-type Section = "overview" | "qc" | "sales" | "returns" | "master";
+type Section =
+  | "overview"
+  | "kelola-stok"
+  | "qc"
+  | "sales"
+  | "returns"
+  | "master";
 type AdminUser = "Hendi" | "Gita";
 
 const AVATARS: Record<string, string> = {
@@ -50,8 +57,9 @@ const AVATARS: Record<string, string> = {
 
 const SECTIONS: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "kelola-stok", label: "Kelola Stok", icon: Boxes },
   { id: "qc", label: "QC Checkpoint", icon: ShieldCheck },
-  { id: "sales", label: "Catat Penjualan", icon: Wallet },
+  { id: "sales", label: "Catatan Penjualan", icon: Wallet },
   { id: "returns", label: "Catat Retur", icon: Undo2 },
   { id: "master", label: "Kelola Master Data", icon: Database },
 ];
@@ -1645,6 +1653,607 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
   );
 }
 
+type StockRow = {
+  id: string;
+  full_name: string;
+  photo_url: string | null;
+  hat_model_id: string;
+  material_id: string;
+  color_id: string;
+  logo_id: string;
+  logo_type: string;
+  stock_qty: number;
+  limited_by: "polos" | "pin" | null;
+};
+
+type Supply = { id: string; name: string; unit: string; current_qty: number };
+type PinLogo = { id: string; name: string; available_qty: number };
+
+function KelolaStokSection({ currentUser }: { currentUser: string }) {
+  const [tab, setTab] = useState<"topi" | "pelengkap">("topi");
+  const [message, setMessage] = useState<FlashMessage | null>(null);
+
+  function flash(text: string, type: FlashType = "success") {
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 2500);
+  }
+
+  // ================= STOK TOPI =================
+  const [rows, setRows] = useState<StockRow[]>([]);
+  const [search, setSearch] = useState("");
+  const [addInputs, setAddInputs] = useState<Record<string, number>>({});
+  const [reduceInputs, setReduceInputs] = useState<Record<string, number>>({});
+  const [reduceReasons, setReduceReasons] = useState<Record<string, string>>(
+    {},
+  );
+
+  async function loadStockRows() {
+    const { data } = await supabase
+      .from("products")
+      .select(
+        "id, full_name, photo_url, hat_model_id, material_id, color_id, logo_id, stock(available_qty), logos!inner(type)",
+      )
+      .eq("is_active", true);
+    if (!data) return;
+
+    const mapped = data.map((p: any) => {
+      const stockData = Array.isArray(p.stock) ? p.stock[0] : p.stock;
+      return {
+        id: p.id,
+        full_name: p.full_name,
+        photo_url: p.photo_url,
+        hat_model_id: p.hat_model_id,
+        material_id: p.material_id,
+        color_id: p.color_id,
+        logo_id: p.logo_id,
+        logo_type: p.logos?.type,
+        stock_qty: stockData?.available_qty ?? 0,
+        limited_by: null as "polos" | "pin" | null,
+      };
+    });
+
+    // Peta stok topi polos berdasarkan kombinasi bentuk+bahan+warna --
+    // ini "kunci" buat nyocokin produk tempel ke topi dasarnya.
+    const polosMap = new Map<string, number>();
+    mapped
+      .filter((p) => p.logo_type === "polos")
+      .forEach((p) => {
+        polosMap.set(
+          `${p.hat_model_id}|${p.material_id}|${p.color_id}`,
+          p.stock_qty,
+        );
+      });
+
+    const { data: pinStockData } = await supabase
+      .from("pin_stock")
+      .select("logo_id, available_qty");
+    const pinMap = new Map<string, number>(
+      (pinStockData ?? []).map((r: any) => [r.logo_id, r.available_qty]),
+    );
+
+    const final: StockRow[] = mapped.map((p) => {
+      if (p.logo_type !== "tempel") return p;
+      const key = `${p.hat_model_id}|${p.material_id}|${p.color_id}`;
+      const polosQty = polosMap.get(key) ?? 0;
+      const pinQty = pinMap.get(p.logo_id) ?? 0;
+      return {
+        ...p,
+        stock_qty: Math.min(polosQty, pinQty),
+        limited_by: polosQty <= pinQty ? "polos" : "pin",
+      };
+    });
+
+    final.sort((a, b) => a.stock_qty - b.stock_qty);
+    setRows(final);
+  }
+
+  async function handleAddStock(row: StockRow) {
+    const qty = addInputs[row.id] || 0;
+    if (qty <= 0) return;
+
+    await supabase.from("stock_adjustments").insert({
+      product_id: row.id,
+      quantity: qty,
+      direction: "tambah",
+      adjusted_by: currentUser,
+    });
+
+    const { data: existing } = await supabase
+      .from("stock")
+      .select("available_qty")
+      .eq("product_id", row.id)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from("stock")
+        .update({
+          available_qty: existing.available_qty + qty,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("product_id", row.id);
+    } else {
+      await supabase
+        .from("stock")
+        .insert({ product_id: row.id, available_qty: qty });
+    }
+
+    setAddInputs((prev) => ({ ...prev, [row.id]: 0 }));
+    flash(`${row.full_name} ditambah ${qty}`, "success");
+    loadStockRows();
+  }
+
+  async function handleReduceStock(row: StockRow) {
+    const qty = reduceInputs[row.id] || 0;
+    if (qty <= 0) return;
+    const reason = reduceReasons[row.id]?.trim() || null;
+
+    await supabase.from("stock_adjustments").insert({
+      product_id: row.id,
+      quantity: qty,
+      direction: "kurang",
+      reason,
+      adjusted_by: currentUser,
+    });
+
+    const { data: existing } = await supabase
+      .from("stock")
+      .select("available_qty")
+      .eq("product_id", row.id)
+      .maybeSingle();
+
+    await supabase
+      .from("stock")
+      .update({
+        available_qty: Math.max(0, (existing?.available_qty ?? 0) - qty),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("product_id", row.id);
+
+    setReduceInputs((prev) => ({ ...prev, [row.id]: 0 }));
+    setReduceReasons((prev) => ({ ...prev, [row.id]: "" }));
+    flash(`${row.full_name} dikurangi ${qty}`, "warning");
+    loadStockRows();
+  }
+
+  // ================= STOK PELENGKAP (reuse pola Ibu Bos) =================
+  const [supplies, setSupplies] = useState<Supply[]>([]);
+  const [pins, setPins] = useState<PinLogo[]>([]);
+  const [supplyAddInputs, setSupplyAddInputs] = useState<
+    Record<string, number>
+  >({});
+  const [supplyReduceInputs, setSupplyReduceInputs] = useState<
+    Record<string, number>
+  >({});
+  const [supplyReduceReasons, setSupplyReduceReasons] = useState<
+    Record<string, string>
+  >({});
+  const [pinBuyInputs, setPinBuyInputs] = useState<Record<string, number>>({});
+  const [pinDefectInputs, setPinDefectInputs] = useState<
+    Record<string, number>
+  >({});
+
+  async function loadSupplies() {
+    const { data } = await supabase
+      .from("packing_supplies")
+      .select("id, name, unit, current_qty")
+      .order("name");
+    if (data) setSupplies(data);
+  }
+
+  async function loadPins() {
+    const { data } = await supabase
+      .from("logos")
+      .select("id, name, pin_stock(available_qty)")
+      .eq("type", "tempel");
+    if (data) {
+      setPins(
+        data.map((p: any) => {
+          const stockRow = Array.isArray(p.pin_stock)
+            ? p.pin_stock[0]
+            : p.pin_stock;
+          return {
+            id: p.id,
+            name: p.name,
+            available_qty: stockRow?.available_qty ?? 0,
+          };
+        }),
+      );
+    }
+  }
+
+  async function handleAddSupply(supply: Supply) {
+    const qty = supplyAddInputs[supply.id] || 0;
+    if (qty <= 0) return;
+    await supabase.from("packing_supply_restocks").insert({
+      supply_id: supply.id,
+      quantity: qty,
+      restocked_by: currentUser,
+    });
+    await supabase
+      .from("packing_supplies")
+      .update({
+        current_qty: supply.current_qty + qty,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", supply.id);
+    setSupplyAddInputs((prev) => ({ ...prev, [supply.id]: 0 }));
+    flash(`${supply.name} ditambah ${qty}`, "success");
+    loadSupplies();
+  }
+
+  async function handleReduceSupply(supply: Supply) {
+    const qty = supplyReduceInputs[supply.id] || 0;
+    if (qty <= 0) return;
+    const reason = supplyReduceReasons[supply.id]?.trim() || null;
+    await supabase.from("packing_supply_adjustments").insert({
+      supply_id: supply.id,
+      quantity: qty,
+      reason,
+      adjusted_by: currentUser,
+    });
+    await supabase
+      .from("packing_supplies")
+      .update({
+        current_qty: Math.max(0, supply.current_qty - qty),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", supply.id);
+    setSupplyReduceInputs((prev) => ({ ...prev, [supply.id]: 0 }));
+    setSupplyReduceReasons((prev) => ({ ...prev, [supply.id]: "" }));
+    flash(`${supply.name} dikurangi ${qty}`, "warning");
+    loadSupplies();
+  }
+
+  async function handleBuyPin(pin: PinLogo) {
+    const bought = pinBuyInputs[pin.id] || 0;
+    if (bought <= 0) return;
+    await supabase.from("pin_purchases").insert({
+      logo_id: pin.id,
+      quantity_purchased: bought,
+      quantity_defect: 0,
+      purchased_by: currentUser,
+    });
+    await supabase.from("pin_stock").upsert(
+      {
+        logo_id: pin.id,
+        available_qty: pin.available_qty + bought,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "logo_id" },
+    );
+    setPinBuyInputs((prev) => ({ ...prev, [pin.id]: 0 }));
+    flash(`Pin ${pin.name}: +${bought} (beli)`, "success");
+    loadPins();
+    loadStockRows(); // stok tempel ikut kena imbas
+  }
+
+  async function handleDefectPin(pin: PinLogo) {
+    const defect = pinDefectInputs[pin.id] || 0;
+    if (defect <= 0) return;
+    await supabase.from("pin_losses").insert({
+      logo_id: pin.id,
+      quantity: defect,
+      reason: "Cacat",
+      reported_by: currentUser,
+    });
+    await supabase
+      .from("pin_stock")
+      .update({
+        available_qty: Math.max(0, pin.available_qty - defect),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("logo_id", pin.id);
+    setPinDefectInputs((prev) => ({ ...prev, [pin.id]: 0 }));
+    flash(`Pin ${pin.name}: -${defect} (cacat)`, "warning");
+    loadPins();
+    loadStockRows();
+  }
+
+  useEffect(() => {
+    loadStockRows();
+    loadSupplies();
+    loadPins();
+  }, []);
+
+  const filteredRows = rows.filter((r) =>
+    r.full_name.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  return (
+    <div className="animate-fadeIn">
+      <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
+        <span className="w-2 h-2 rounded-full bg-accent-400"></span>
+        Kelola Stok
+      </h2>
+
+      <StatusBanner message={message} />
+
+      {/* Tab switcher */}
+      <div className="flex gap-2 mb-5 border-b border-line">
+        <button
+          onClick={() => setTab("topi")}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === "topi"
+              ? "border-accent-400 text-accent-400"
+              : "border-transparent text-neutral-500 hover:text-neutral-300"
+          }`}
+        >
+          Stok Topi
+        </button>
+        <button
+          onClick={() => setTab("pelengkap")}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === "pelengkap"
+              ? "border-accent-400 text-accent-400"
+              : "border-transparent text-neutral-500 hover:text-neutral-300"
+          }`}
+        >
+          Stok Pelengkap
+        </button>
+      </div>
+
+      {/* ===== STOK TOPI ===== */}
+      {tab === "topi" && (
+        <div>
+          <div className="relative mb-4">
+            <Search
+              size={16}
+              strokeWidth={1.75}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
+            />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Cari nama produk..."
+              className="w-full bg-panel border border-line rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+            />
+          </div>
+
+          <div className="space-y-2">
+            {filteredRows.map((row) => (
+              <div
+                key={row.id}
+                className="bg-panel border border-line rounded-xl p-3 flex items-center gap-3 flex-wrap"
+              >
+                {row.photo_url ? (
+                  <img
+                    src={row.photo_url}
+                    alt={row.full_name}
+                    className="w-20 aspect-video rounded-lg object-cover shrink-0"
+                  />
+                ) : (
+                  <div className="w-20 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
+                    <Package
+                      size={16}
+                      strokeWidth={1.5}
+                      className="text-neutral-600"
+                    />
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-neutral-100 truncate">
+                    {row.full_name}
+                  </p>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    <span className="text-neutral-300 font-medium tabular-nums">
+                      {row.stock_qty} pcs
+                    </span>
+                    {row.logo_type === "tempel" && (
+                      <span className="ml-2 text-amber-400/90">
+                        · Stok Virtual · Terbatas oleh:{" "}
+                        {row.limited_by === "polos" ? "Topi Polos" : "Pin"}
+                      </span>
+                    )}
+                  </p>
+                </div>
+
+                {row.logo_type === "tempel" ? (
+                  <div className="shrink-0 text-xs text-neutral-600 italic px-2">
+                    Otomatis (tak bisa diedit)
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50"
+                      value={addInputs[row.id] || ""}
+                      onChange={(e) =>
+                        setAddInputs((prev) => ({
+                          ...prev,
+                          [row.id]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <button
+                      onClick={() => handleAddStock(row)}
+                      className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm px-3 py-2 rounded-lg hover:bg-emerald-500/30 transition-colors"
+                    >
+                      Tambah
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="Alasan"
+                      className="w-24 bg-black/40 border border-line rounded-lg px-2 py-2 text-xs focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/50"
+                      value={reduceReasons[row.id] || ""}
+                      onChange={(e) =>
+                        setReduceReasons((prev) => ({
+                          ...prev,
+                          [row.id]: e.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/50"
+                      value={reduceInputs[row.id] || ""}
+                      onChange={(e) =>
+                        setReduceInputs((prev) => ({
+                          ...prev,
+                          [row.id]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <button
+                      onClick={() => handleReduceStock(row)}
+                      className="bg-red-500/20 text-red-400 border border-red-500/30 text-sm px-3 py-2 rounded-lg hover:bg-red-500/30 transition-colors"
+                    >
+                      Kurangi
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ===== STOK PELENGKAP ===== */}
+      {tab === "pelengkap" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div>
+            <h3 className="text-sm uppercase tracking-wide text-neutral-500 font-medium mb-3">
+              Bahan Pelengkap
+            </h3>
+            <div className="space-y-2">
+              {supplies.map((s) => (
+                <div
+                  key={s.id}
+                  className="bg-panel border border-line rounded-xl px-4 py-3.5"
+                >
+                  <div className="flex justify-between mb-2.5">
+                    <p className="font-medium text-sm text-neutral-100">
+                      {s.name}
+                    </p>
+                    <p className="text-sm text-neutral-500">
+                      Stok: {s.current_qty} {s.unit}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-emerald-500"
+                      value={supplyAddInputs[s.id] || ""}
+                      onChange={(e) =>
+                        setSupplyAddInputs((prev) => ({
+                          ...prev,
+                          [s.id]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <button
+                      onClick={() => handleAddSupply(s)}
+                      className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm px-3 py-2 rounded-lg hover:bg-emerald-500/30 transition-colors"
+                    >
+                      Tambah
+                    </button>
+                    <input
+                      type="text"
+                      placeholder="Alasan"
+                      className="w-24 bg-black/40 border border-line rounded-lg px-2 py-2 text-xs focus:outline-none focus:border-red-500"
+                      value={supplyReduceReasons[s.id] || ""}
+                      onChange={(e) =>
+                        setSupplyReduceReasons((prev) => ({
+                          ...prev,
+                          [s.id]: e.target.value,
+                        }))
+                      }
+                    />
+                    <input
+                      type="number"
+                      placeholder="0"
+                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-red-500"
+                      value={supplyReduceInputs[s.id] || ""}
+                      onChange={(e) =>
+                        setSupplyReduceInputs((prev) => ({
+                          ...prev,
+                          [s.id]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <button
+                      onClick={() => handleReduceSupply(s)}
+                      className="bg-red-500/20 text-red-400 border border-red-500/30 text-sm px-3 py-2 rounded-lg hover:bg-red-500/30 transition-colors"
+                    >
+                      Kurangi
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm uppercase tracking-wide text-neutral-500 font-medium mb-3">
+              Pin Logam Logo
+            </h3>
+            <div className="space-y-2">
+              {pins.map((p) => (
+                <div
+                  key={p.id}
+                  className="bg-panel border border-line rounded-xl px-4 py-3.5"
+                >
+                  <div className="flex justify-between mb-2.5">
+                    <p className="font-medium text-sm text-neutral-100">
+                      {p.name}
+                    </p>
+                    <p className="text-sm text-neutral-500">
+                      Stok baik: {p.available_qty}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="number"
+                      placeholder="Beli"
+                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-emerald-500"
+                      value={pinBuyInputs[p.id] || ""}
+                      onChange={(e) =>
+                        setPinBuyInputs((prev) => ({
+                          ...prev,
+                          [p.id]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <button
+                      onClick={() => handleBuyPin(p)}
+                      className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm px-3 py-2 rounded-lg hover:bg-emerald-500/30 transition-colors"
+                    >
+                      Beli
+                    </button>
+                    <input
+                      type="number"
+                      placeholder="Cacat"
+                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-red-500"
+                      value={pinDefectInputs[p.id] || ""}
+                      onChange={(e) =>
+                        setPinDefectInputs((prev) => ({
+                          ...prev,
+                          [p.id]: Number(e.target.value),
+                        }))
+                      }
+                    />
+                    <button
+                      onClick={() => handleDefectPin(p)}
+                      className="bg-red-500/20 text-red-400 border border-red-500/30 text-sm px-3 py-2 rounded-lg hover:bg-red-500/30 transition-colors"
+                    >
+                      Cacat
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const MASTER_TABS = [
   { id: "model", label: "Model Topi", table: "hat_models" },
   { id: "material", label: "Bahan", table: "materials" },
@@ -2708,6 +3317,9 @@ export default function AdminPage() {
         <div className="flex-1 p-4 md:p-8 min-w-0">
           {activeSection === "overview" && (
             <OverviewSection currentUser={currentUser} />
+          )}
+          {activeSection === "kelola-stok" && (
+            <KelolaStokSection currentUser={currentUser} />
           )}
           {activeSection === "qc" && (
             <QcCheckpointSection
