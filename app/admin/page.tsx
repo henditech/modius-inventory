@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   LayoutDashboard,
   Boxes,
+  Plus,
+  Minus,
   ShieldCheck,
   Wallet,
   Undo2,
@@ -1681,11 +1683,7 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
   // ================= STOK TOPI =================
   const [rows, setRows] = useState<StockRow[]>([]);
   const [search, setSearch] = useState("");
-  const [addInputs, setAddInputs] = useState<Record<string, number>>({});
-  const [reduceInputs, setReduceInputs] = useState<Record<string, number>>({});
-  const [reduceReasons, setReduceReasons] = useState<Record<string, string>>(
-    {},
-  );
+  const [qtyInputs, setQtyInputs] = useState<Record<string, number>>({});
 
   async function loadStockRows() {
     const { data } = await supabase
@@ -1748,7 +1746,7 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
   }
 
   async function handleAddStock(row: StockRow) {
-    const qty = addInputs[row.id] || 0;
+    const qty = qtyInputs[row.id] || 0;
     if (qty <= 0) return;
 
     await supabase.from("stock_adjustments").insert({
@@ -1778,15 +1776,16 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
         .insert({ product_id: row.id, available_qty: qty });
     }
 
-    setAddInputs((prev) => ({ ...prev, [row.id]: 0 }));
+    setQtyInputs((prev) => ({ ...prev, [row.id]: 0 }));
     flash(`${row.full_name} ditambah ${qty}`, "success");
     loadStockRows();
   }
 
   async function handleReduceStock(row: StockRow) {
-    const qty = reduceInputs[row.id] || 0;
+    const qty = qtyInputs[row.id] || 0;
     if (qty <= 0) return;
-    const reason = reduceReasons[row.id]?.trim() || null;
+    const reason =
+      window.prompt(`Alasan mengurangi ${row.full_name}?`, "") || null;
 
     await supabase.from("stock_adjustments").insert({
       product_id: row.id,
@@ -1810,8 +1809,7 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
       })
       .eq("product_id", row.id);
 
-    setReduceInputs((prev) => ({ ...prev, [row.id]: 0 }));
-    setReduceReasons((prev) => ({ ...prev, [row.id]: "" }));
+    setQtyInputs((prev) => ({ ...prev, [row.id]: 0 }));
     flash(`${row.full_name} dikurangi ${qty}`, "warning");
     loadStockRows();
   }
@@ -1996,118 +1994,119 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
       {/* ===== STOK TOPI ===== */}
       {tab === "topi" && (
         <div>
-          <div className="relative mb-4">
-            <Search
-              size={16}
-              strokeWidth={1.75}
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
-            />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari nama produk..."
-              className="w-full bg-panel border border-line rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-            />
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[240px]">
+              <Search
+                size={16}
+                strokeWidth={1.75}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
+              />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari nama produk..."
+                className="w-full bg-panel border border-line rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+              />
+            </div>
+            <p className="text-sm text-neutral-500 shrink-0">
+              <span className="text-neutral-200 font-medium tabular-nums">
+                {filteredRows.length}
+              </span>{" "}
+              Total Produk
+            </p>
           </div>
 
-          <div className="space-y-2">
-            {filteredRows.map((row) => (
-              <div
-                key={row.id}
-                className="bg-panel border border-line rounded-xl p-3 flex items-center gap-3 flex-wrap"
-              >
-                {row.photo_url ? (
-                  <img
-                    src={row.photo_url}
-                    alt={row.full_name}
-                    className="w-20 aspect-video rounded-lg object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-20 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
-                    <Package
-                      size={16}
-                      strokeWidth={1.5}
-                      className="text-neutral-600"
-                    />
-                  </div>
-                )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+            {filteredRows.map((row) => {
+              const status =
+                row.stock_qty <= 50
+                  ? { label: "Kritis", dot: "bg-red-500", text: "text-red-400" }
+                  : row.stock_qty <= 100
+                    ? {
+                        label: "Menipis",
+                        dot: "bg-amber-500",
+                        text: "text-amber-400",
+                      }
+                    : {
+                        label: "Aman",
+                        dot: "bg-emerald-500",
+                        text: "text-emerald-400",
+                      };
 
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-neutral-100 truncate">
-                    {row.full_name}
-                  </p>
-                  <p className="text-xs text-neutral-500 mt-0.5">
-                    <span className="text-neutral-300 font-medium tabular-nums">
-                      {row.stock_qty} pcs
-                    </span>
-                    {row.logo_type === "tempel" && (
-                      <span className="ml-2 text-amber-400/90">
-                        · Stok Virtual · Terbatas oleh:{" "}
-                        {row.limited_by === "polos" ? "Topi Polos" : "Pin"}
+              return (
+                <div
+                  key={row.id}
+                  className="bg-panel border border-line rounded-xl overflow-hidden hover:border-accent-500/30 transition-colors"
+                >
+                  {row.photo_url ? (
+                    <img
+                      src={row.photo_url}
+                      alt={row.full_name}
+                      className="w-full aspect-video object-cover"
+                    />
+                  ) : (
+                    <div className="w-full aspect-video bg-black/30 flex items-center justify-center">
+                      <Package
+                        size={18}
+                        strokeWidth={1.5}
+                        className="text-neutral-600"
+                      />
+                    </div>
+                  )}
+
+                  <div className="p-3">
+                    <p className="text-xs font-medium truncate mb-1.5">
+                      {row.full_name}
+                    </p>
+                    <div className="flex items-center gap-1.5 mb-2.5">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${status.dot}`}
+                      ></span>
+                      <span className={`text-xs ${status.text}`}>
+                        {row.stock_qty} pcs — {status.label}
                       </span>
-                    )}
-                  </p>
-                </div>
+                    </div>
 
-                {row.logo_type === "tempel" ? (
-                  <div className="shrink-0 text-xs text-neutral-600 italic px-2">
-                    Otomatis (tak bisa diedit)
+                    {row.logo_type === "tempel" ? (
+                      <p className="text-[11px] text-amber-400/90 italic">
+                        Virtual · Terbatas:{" "}
+                        {row.limited_by === "polos" ? "Topi Polos" : "Pin"}
+                      </p>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          placeholder="0"
+                          className="w-14 bg-black/40 border border-line rounded-lg px-1.5 py-1.5 text-center text-xs focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
+                          value={qtyInputs[row.id] || ""}
+                          onChange={(e) =>
+                            setQtyInputs((prev) => ({
+                              ...prev,
+                              [row.id]: Number(e.target.value),
+                            }))
+                          }
+                        />
+                        <button
+                          onClick={() => handleAddStock(row)}
+                          title="Tambah stok"
+                          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                        >
+                          <Plus size={14} strokeWidth={2} />
+                        </button>
+                        <button
+                          onClick={() => handleReduceStock(row)}
+                          title="Kurangi stok"
+                          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors"
+                        >
+                          <Minus size={14} strokeWidth={2} />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    <input
-                      type="number"
-                      placeholder="0"
-                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50"
-                      value={addInputs[row.id] || ""}
-                      onChange={(e) =>
-                        setAddInputs((prev) => ({
-                          ...prev,
-                          [row.id]: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <button
-                      onClick={() => handleAddStock(row)}
-                      className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm px-3 py-2 rounded-lg hover:bg-emerald-500/30 transition-colors"
-                    >
-                      Tambah
-                    </button>
-                    <input
-                      type="text"
-                      placeholder="Alasan"
-                      className="w-24 bg-black/40 border border-line rounded-lg px-2 py-2 text-xs focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/50"
-                      value={reduceReasons[row.id] || ""}
-                      onChange={(e) =>
-                        setReduceReasons((prev) => ({
-                          ...prev,
-                          [row.id]: e.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="number"
-                      placeholder="0"
-                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500/50"
-                      value={reduceInputs[row.id] || ""}
-                      onChange={(e) =>
-                        setReduceInputs((prev) => ({
-                          ...prev,
-                          [row.id]: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <button
-                      onClick={() => handleReduceStock(row)}
-                      className="bg-red-500/20 text-red-400 border border-red-500/30 text-sm px-3 py-2 rounded-lg hover:bg-red-500/30 transition-colors"
-                    >
-                      Kurangi
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -2509,8 +2508,7 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
     const { data } = await supabase
       .from("products")
       .select("id, sku, full_name, photo_url")
-      .order("created_at", { ascending: false })
-      .limit(60);
+      .order("created_at", { ascending: false });
     setExistingProducts(data ?? []);
   }
 
