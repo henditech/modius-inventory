@@ -2460,20 +2460,30 @@ function MasterDataSection({ currentUser }: { currentUser: string }) {
 }
 
 type MasterOption = { id: string; name: string; code: string; type?: string };
+type ExistingProduct = {
+  id: string;
+  sku: string;
+  full_name: string;
+  photo_url: string | null;
+  hat_model_id: string;
+  material_id: string;
+  color_id: string;
+  logo_id: string;
+};
 
 function ProductFormSection({ currentUser }: { currentUser: string }) {
+  const canEdit = currentUser === "Hendi";
+
   const [hatModels, setHatModels] = useState<MasterOption[]>([]);
   const [materials, setMaterials] = useState<MasterOption[]>([]);
   const [colors, setColors] = useState<MasterOption[]>([]);
   const [logos, setLogos] = useState<MasterOption[]>([]);
-  const [existingProducts, setExistingProducts] = useState<
-    {
-      id: string;
-      sku: string;
-      full_name: string;
-      photo_url: string | null;
-    }[]
-  >([]);
+  const [existingProducts, setExistingProducts] = useState<ExistingProduct[]>(
+    [],
+  );
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const skipNextAutoSuggest = useRef(false);
 
   const [hatModelId, setHatModelId] = useState("");
   const [materialId, setMaterialId] = useState("");
@@ -2507,7 +2517,9 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
   async function loadExistingProducts() {
     const { data } = await supabase
       .from("products")
-      .select("id, sku, full_name, photo_url")
+      .select(
+        "id, sku, full_name, photo_url, hat_model_id, material_id, color_id, logo_id",
+      )
       .order("created_at", { ascending: false });
     setExistingProducts(data ?? []);
   }
@@ -2519,8 +2531,18 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
 
   // Auto-suggest SKU & nama produk begitu 4 dropdown di atas udah kepilih
   // semua. Tetap bisa diedit manual di kolomnya sebelum disimpan.
+  //
+  // Di-skip SEKALI kalau baru aja masuk mode edit (lihat handleSelectProduct)
+  // -- soalnya begitu masuk mode edit, 4 dropdown langsung keisi otomatis
+  // dari produk yang diklik, dan tanpa penanda ini effect ini bakal langsung
+  // nimpa SKU/Nama asli produk dengan hasil auto-generate sebelum sempat
+  // ditampilin ke user.
   useEffect(() => {
     if (!hatModelId || !materialId || !colorId || !logoId) return;
+    if (skipNextAutoSuggest.current) {
+      skipNextAutoSuggest.current = false;
+      return;
+    }
     const hm = hatModels.find((x) => x.id === hatModelId);
     const mt = materials.find((x) => x.id === materialId);
     const cl = colors.find((x) => x.id === colorId);
@@ -2539,6 +2561,33 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
     colors,
     logos,
   ]);
+
+  function handleSelectProduct(p: ExistingProduct) {
+    if (!canEdit) return;
+    skipNextAutoSuggest.current = true;
+    setEditingId(p.id);
+    setHatModelId(p.hat_model_id);
+    setMaterialId(p.material_id);
+    setColorId(p.color_id);
+    setLogoId(p.logo_id);
+    setSku(p.sku);
+    setFullName(p.full_name);
+    setPhotoFile(null);
+    setPhotoPreview(p.photo_url);
+  }
+
+  function handleCancelEdit() {
+    skipNextAutoSuggest.current = false;
+    setEditingId(null);
+    setHatModelId("");
+    setMaterialId("");
+    setColorId("");
+    setLogoId("");
+    setSku("");
+    setFullName("");
+    setPhotoFile(null);
+    setPhotoPreview(null);
+  }
 
   function handlePhotoChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -2559,9 +2608,13 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
 
     setSaving(true);
 
-    // Upload foto dulu (kalau ada) sebelum insert baris produknya, biar
-    // photo_url-nya udah siap dipasang bareng data lain dalam satu insert.
-    let photoUrl: string | null = null;
+    // Kalau lagi edit dan foto gak diganti, tetap pakai foto lama --
+    // jangan sampai photo_url ke-reset jadi null gara-gara kolom foto
+    // dibiarin kosong.
+    let photoUrl: string | null = editingId
+      ? (existingProducts.find((p) => p.id === editingId)?.photo_url ?? null)
+      : null;
+
     if (photoFile) {
       const ext = photoFile.name.split(".").pop();
       const path = `${sku.trim().toLowerCase()}-${Date.now()}.${ext}`;
@@ -2581,7 +2634,7 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
       photoUrl = publicUrlData.publicUrl;
     }
 
-    const { error } = await supabase.from("products").insert({
+    const payload = {
       hat_model_id: hatModelId,
       material_id: materialId,
       color_id: colorId,
@@ -2589,8 +2642,11 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
       sku: sku.trim().toUpperCase(),
       full_name: fullName.trim(),
       photo_url: photoUrl,
-      is_active: true,
-    });
+    };
+
+    const { error } = editingId
+      ? await supabase.from("products").update(payload).eq("id", editingId)
+      : await supabase.from("products").insert({ ...payload, is_active: true });
 
     setSaving(false);
 
@@ -2598,21 +2654,19 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
       flash(
         error.message.toLowerCase().includes("duplicate")
           ? "SKU ini sudah ada, coba cek lagi kombinasinya"
-          : "Gagal menambah produk, coba lagi",
+          : editingId
+            ? "Gagal menyimpan perubahan, coba lagi"
+            : "Gagal menambah produk, coba lagi",
         "error",
       );
       return;
     }
 
-    flash("Produk baru ditambahkan!", "success");
-    setHatModelId("");
-    setMaterialId("");
-    setColorId("");
-    setLogoId("");
-    setSku("");
-    setFullName("");
-    setPhotoFile(null);
-    setPhotoPreview(null);
+    flash(
+      editingId ? "Perubahan disimpan!" : "Produk baru ditambahkan!",
+      "success",
+    );
+    handleCancelEdit();
     loadExistingProducts();
   }
 
@@ -2625,12 +2679,20 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
         <div>
           <h3 className="text-sm text-neutral-500 font-medium mb-3">
             Produk yang sudah ada ({existingProducts.length})
+            {canEdit && (
+              <span className="ml-2 text-neutral-600 font-normal">
+                — klik foto untuk edit
+              </span>
+            )}
           </h3>
           <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2 max-h-[560px] overflow-y-auto pr-1">
             {existingProducts.map((p) => (
               <div
                 key={p.id}
-                className="bg-panel border border-line rounded-lg overflow-hidden"
+                onClick={() => handleSelectProduct(p)}
+                className={`bg-panel border rounded-lg overflow-hidden transition-colors ${
+                  canEdit ? "cursor-pointer hover:border-accent-500/50" : ""
+                } ${editingId === p.id ? "border-accent-500" : "border-line"}`}
               >
                 <div className="aspect-video bg-black/30">
                   {p.photo_url && (
@@ -2659,10 +2721,18 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
           </div>
         </div>
 
-        {/* Form tambah produk baru */}
+        {/* Form tambah / edit produk */}
         <div className="bg-panel border border-line rounded-xl p-5 lg:sticky lg:top-20">
-          <h3 className="text-sm font-medium text-neutral-300 mb-4">
-            Tambah Produk Baru
+          <h3 className="text-sm font-medium text-neutral-300 mb-4 flex items-center justify-between">
+            {editingId ? "Edit Produk" : "Tambah Produk Baru"}
+            {editingId && (
+              <button
+                onClick={handleCancelEdit}
+                className="text-xs text-neutral-500 hover:text-neutral-300"
+              >
+                Batal
+              </button>
+            )}
           </h3>
 
           <label className="text-xs text-neutral-400 mb-1.5 font-medium block">
@@ -2781,12 +2851,17 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
             className="shine-btn w-full bg-accent-500 hover:bg-accent-400 disabled:opacity-60 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95 mt-1 flex items-center justify-center gap-2"
           >
             {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? "Menyimpan..." : "Tambah Produk"}
+            {saving
+              ? "Menyimpan..."
+              : editingId
+                ? "Simpan Perubahan"
+                : "Tambah Produk"}
           </button>
 
           <p className="text-[11px] text-neutral-600 mt-3">
-            Ditambahkan oleh {currentUser}. SKU & nama otomatis terisi dari
-            pilihan di atas, tapi bisa diedit sebelum disimpan.
+            {editingId
+              ? `Diedit oleh ${currentUser}. Foto lama tetap dipakai kalau kamu gak pilih foto baru.`
+              : `Ditambahkan oleh ${currentUser}. SKU & nama otomatis terisi dari pilihan di atas, tapi bisa diedit sebelum disimpan.`}
           </p>
         </div>
       </div>
