@@ -2606,6 +2606,10 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
       return;
     }
 
+    const oldPhotoUrl = editingId
+      ? (existingProducts.find((p) => p.id === editingId)?.photo_url ?? null)
+      : null;
+
     setSaving(true);
 
     // Kalau lagi edit dan foto gak diganti, tetap pakai foto lama --
@@ -2660,6 +2664,17 @@ function ProductFormSection({ currentUser }: { currentUser: string }) {
         "error",
       );
       return;
+    }
+
+    // Foto lama dihapus DARI STORAGE cuma kalau: lagi mode edit, ada foto
+    // baru yang diupload (ganti), dan produknya emang punya foto lama.
+    // Sengaja dijalanin SETELAH update produk berhasil -- biar kalau
+    // update-nya gagal, foto lama tetap aman gak kehapus duluan.
+    if (editingId && photoFile && oldPhotoUrl) {
+      const oldPath = oldPhotoUrl.split("/product-photos/")[1];
+      if (oldPath) {
+        await supabase.storage.from("product-photos").remove([oldPath]);
+      }
     }
 
     flash(
