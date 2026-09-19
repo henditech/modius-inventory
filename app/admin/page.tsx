@@ -3185,7 +3185,15 @@ function formatChatDate(iso: string) {
   });
 }
 
-function ObrolanSection({ currentUser }: { currentUser: AdminUser }) {
+function ObrolanSection({
+  currentUser,
+  onlineUsers,
+}: {
+  currentUser: AdminUser;
+  onlineUsers: string[];
+}) {
+  const partner: AdminUser = currentUser === "Hendi" ? "Gita" : "Hendi";
+  const partnerOnline = onlineUsers.includes(partner);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -3253,23 +3261,22 @@ function ObrolanSection({ currentUser }: { currentUser: AdminUser }) {
 
   return (
     <div className="animate-fadeIn max-w-2xl mx-auto flex flex-col h-[calc(100vh-160px)]">
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold text-neutral-100">Diskusi</h2>
-        <p className="text-xs text-neutral-500 mt-1">
-          Sampaikan masukan atau diskusikan pengembangan sistem ini bersama tim.
-        </p>
-      </div>
-
-      <div className="flex-1 overflow-y-auto rounded-lg border border-line bg-panel/50 p-4 space-y-3">
-        {loading && (
-          <p className="text-center text-xs text-neutral-600 py-8">Memuat…</p>
-        )}
-
-        {!loading && messages.length === 0 && (
-          <p className="text-center text-xs text-neutral-600 py-8">
-            Belum ada obrolan. Tulis sesuatu di bawah ✍️
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-100">Diskusi</h2>
+          <p className="text-xs text-neutral-500 mt-1">
+            Sampaikan masukan atau diskusikan pengembangan sistem ini bersama
+            tim.
           </p>
-        )}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 shrink-0">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              partnerOnline ? "bg-emerald-400" : "bg-neutral-600"
+            }`}
+          />
+          {partner} {partnerOnline ? "online" : "offline"}
+        </div>
 
         {messages.map((m, i) => {
           const mine = m.sender === currentUser;
@@ -3530,27 +3537,20 @@ export default function AdminPage() {
           </h1>
         </div>
 
-        <div className="flex items-center gap-2">
-          <PartnerStatusDot
-            currentUser={currentUser}
-            onlineUsers={onlineUsers}
+        <div className="flex items-center gap-2.5 pl-1.5 pr-2 md:pr-3 py-1.5 rounded-lg border border-line">
+          <img
+            src={AVATARS[currentUser]}
+            alt={currentUser}
+            className="w-7 h-7 rounded-full object-cover"
           />
-
-          <div className="flex items-center gap-2.5 pl-1.5 pr-2 md:pr-3 py-1.5 rounded-lg border border-line">
-            <img
-              src={AVATARS[currentUser]}
-              alt={currentUser}
-              className="w-7 h-7 rounded-full object-cover"
-            />
-            <span className="text-left leading-tight hidden sm:block">
-              <span className="block text-sm font-medium text-neutral-100">
-                {currentUser}
-              </span>
-              <span className="block text-[11px] text-neutral-500">
-                Administrator
-              </span>
+          <span className="text-left leading-tight hidden sm:block">
+            <span className="block text-sm font-medium text-neutral-100">
+              {currentUser}
             </span>
-          </div>
+            <span className="block text-[11px] text-neutral-500">
+              Administrator
+            </span>
+          </span>
         </div>
       </div>
 
@@ -3648,7 +3648,10 @@ export default function AdminPage() {
             <MasterDataSection currentUser={currentUser} />
           )}
           {activeSection === "chat" && (
-            <ObrolanSection currentUser={currentUser} />
+            <ObrolanSection
+              currentUser={currentUser}
+              onlineUsers={onlineUsers}
+            />
           )}
         </div>
       </div>
