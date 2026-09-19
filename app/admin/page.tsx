@@ -25,6 +25,7 @@ import {
   ImagePlus,
   Loader2,
   Search,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -49,7 +50,8 @@ type Section =
   | "qc"
   | "sales"
   | "returns"
-  | "master";
+  | "master"
+  | "chat";
 type AdminUser = "Hendi" | "Gita";
 
 const AVATARS: Record<string, string> = {
@@ -64,6 +66,7 @@ const SECTIONS: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "sales", label: "Catatan Penjualan", icon: Wallet },
   { id: "returns", label: "Catatan Retur", icon: Undo2 },
   { id: "master", label: "Kelola Master Data", icon: Database },
+  { id: "chat", label: "Diskusi", icon: MessageCircle },
 ];
 
 type FlashType = "success" | "warning" | "error";
@@ -705,6 +708,35 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
           Muat lebih banyak
         </button>
       )}
+    </div>
+  );
+}
+
+function PartnerStatusDot({
+  currentUser,
+  onlineUsers,
+}: {
+  currentUser: AdminUser;
+  onlineUsers: string[];
+}) {
+  const partner: AdminUser = currentUser === "Hendi" ? "Gita" : "Hendi";
+  const isOnline = onlineUsers.includes(partner);
+
+  return (
+    <div
+      className="relative w-6 h-6 shrink-0"
+      title={isOnline ? "Online" : "Offline"}
+    >
+      <img
+        src={AVATARS[partner]}
+        alt=""
+        className="w-6 h-6 rounded-full object-cover"
+      />
+      <span
+        className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-panel ${
+          isOnline ? "bg-emerald-400" : "bg-neutral-600"
+        }`}
+      />
     </div>
   );
 }
@@ -3128,12 +3160,231 @@ function MappingsSection() {
   );
 }
 
+type ChatMessage = {
+  id: string;
+  sender: AdminUser;
+  body: string;
+  created_at: string;
+};
+
+const CHAT_TTL_MS = 24 * 60 * 60 * 1000; // 24 jam
+
+function formatChatTime(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatChatDate(iso: string) {
+  const d = new Date(iso);
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  if (isToday) return "Hari ini";
+  return d.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "long",
+  });
+}
+
+function ObrolanSection({ currentUser }: { currentUser: AdminUser }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    loadMessages();
+
+    const channel = supabase
+      .channel("chat_messages_feed")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages" },
+        (payload) => {
+          setMessages((prev) => [...prev, payload.new as ChatMessage]);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  async function loadMessages() {
+    setLoading(true);
+
+    // Bersihkan pesan lebih dari 24 jam dulu
+    const cutoff = new Date(Date.now() - CHAT_TTL_MS).toISOString();
+    await supabase.from("chat_messages").delete().lt("created_at", cutoff);
+
+    // Ambil sisa pesan yang masih dalam 24 jam
+    const { data } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: true });
+
+    setMessages((data as ChatMessage[]) ?? []);
+    setLoading(false);
+  }
+
+  async function handleSend() {
+    const body = text.trim();
+    if (!body || sending) return;
+    setSending(true);
+    setText("");
+
+    const { error } = await supabase.from("chat_messages").insert({
+      sender: currentUser,
+      body,
+    });
+
+    if (error) {
+      console.error(error);
+      setText(body); // kembalikan teks kalau gagal kirim
+    }
+    setSending(false);
+  }
+
+  return (
+    <div className="animate-fadeIn max-w-2xl mx-auto flex flex-col h-[calc(100vh-160px)]">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-neutral-100">Diskusi</h2>
+        <p className="text-xs text-neutral-500 mt-1">
+          Sampaikan masukan atau diskusikan pengembangan sistem ini bersama tim.
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto rounded-lg border border-line bg-panel/50 p-4 space-y-3">
+        {loading && (
+          <p className="text-center text-xs text-neutral-600 py-8">Memuat…</p>
+        )}
+
+        {!loading && messages.length === 0 && (
+          <p className="text-center text-xs text-neutral-600 py-8">
+            Belum ada obrolan. Tulis sesuatu di bawah ✍️
+          </p>
+        )}
+
+        {messages.map((m, i) => {
+          const mine = m.sender === currentUser;
+          const prev = messages[i - 1];
+          const showDateDivider =
+            !prev ||
+            new Date(prev.created_at).toDateString() !==
+              new Date(m.created_at).toDateString();
+
+          return (
+            <div key={m.id}>
+              {showDateDivider && (
+                <div className="text-center text-[11px] text-neutral-600 my-3">
+                  {formatChatDate(m.created_at)}
+                </div>
+              )}
+              <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm ${
+                    mine
+                      ? "bg-accent-500 text-white rounded-br-sm"
+                      : "bg-white/5 border border-line text-neutral-100 rounded-bl-sm"
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                  <span
+                    className={`block text-[10px] mt-1 ${
+                      mine ? "text-white/70" : "text-neutral-500"
+                    }`}
+                  >
+                    {formatChatTime(m.created_at)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Tulis pesan…"
+          className="flex-1 bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500"
+        />
+        <button
+          onClick={handleSend}
+          disabled={!text.trim() || sending}
+          className="shine-btn bg-accent-500 hover:bg-accent-400 disabled:opacity-40 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors"
+        >
+          Kirim
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<Section>("overview");
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [hasUnreadChat, setHasUnreadChat] = useState(false);
   const [qcPendingCount, setQcPendingCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const channel = supabase.channel("admin-presence", {
+      config: { presence: { key: currentUser } },
+    });
+
+    channel
+      .on("presence", { event: "sync" }, () => {
+        setOnlineUsers(Object.keys(channel.presenceState()));
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ online_at: Date.now() });
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
+
+  // // Notifikasi: dengar pesan baru dari lawan bicara
+  useEffect(() => {
+    if (!currentUser) return;
+    const channel = supabase
+      .channel("chat_notify")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages" },
+        (payload) => {
+          if (payload.new.sender !== currentUser) {
+            setHasUnreadChat(true);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("modiusUser");
@@ -3278,20 +3529,28 @@ export default function AdminPage() {
             Modius Admin
           </h1>
         </div>
-        <div className="flex items-center gap-2.5 pl-1.5 pr-2 md:pr-3 py-1.5 rounded-lg border border-line">
-          <img
-            src={AVATARS[currentUser]}
-            alt={currentUser}
-            className="w-7 h-7 rounded-full object-cover"
+
+        <div className="flex items-center gap-2">
+          <PartnerStatusDot
+            currentUser={currentUser}
+            onlineUsers={onlineUsers}
           />
-          <span className="text-left leading-tight hidden sm:block">
-            <span className="block text-sm font-medium text-neutral-100">
-              {currentUser}
+
+          <div className="flex items-center gap-2.5 pl-1.5 pr-2 md:pr-3 py-1.5 rounded-lg border border-line">
+            <img
+              src={AVATARS[currentUser]}
+              alt={currentUser}
+              className="w-7 h-7 rounded-full object-cover"
+            />
+            <span className="text-left leading-tight hidden sm:block">
+              <span className="block text-sm font-medium text-neutral-100">
+                {currentUser}
+              </span>
+              <span className="block text-[11px] text-neutral-500">
+                Administrator
+              </span>
             </span>
-            <span className="block text-[11px] text-neutral-500">
-              Administrator
-            </span>
-          </span>
+          </div>
         </div>
       </div>
 
@@ -3333,6 +3592,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setActiveSection(s.id);
                     setMobileNavOpen(false);
+                    if (s.id === "chat") setHasUnreadChat(false);
                   }}
                   className={`w-full text-left px-3 py-2.5 rounded-r-lg text-sm font-medium transition-colors duration-200 flex items-center justify-between gap-2.5 border-l-2 ${
                     active
@@ -3354,6 +3614,9 @@ export default function AdminPage() {
                     <span className="bg-amber-500 text-black text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
                       {qcPendingCount}
                     </span>
+                  )}
+                  {s.id === "chat" && hasUnreadChat && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
                   )}
                 </button>
               );
@@ -3383,6 +3646,9 @@ export default function AdminPage() {
           )}
           {activeSection === "master" && (
             <MasterDataSection currentUser={currentUser} />
+          )}
+          {activeSection === "chat" && (
+            <ObrolanSection currentUser={currentUser} />
           )}
         </div>
       </div>
