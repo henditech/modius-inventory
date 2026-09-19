@@ -18,6 +18,8 @@ const ROUTES: Record<
   "bu bos": { path: "/ibu-bos", displayName: "Ibu Bos" },
   hendi: { path: "/admin", asUser: "Hendi", displayName: "Hendi" },
   gita: { path: "/admin", asUser: "Gita", displayName: "Gita" },
+  scanner: { path: "/scan", displayName: "Scanner" },
+  scan: { path: "/scan", displayName: "Scanner" },
 };
 
 const GREETING_LINES = [

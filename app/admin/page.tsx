@@ -62,7 +62,7 @@ const SECTIONS: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "kelola-stok", label: "Kelola Stok", icon: Boxes },
   { id: "qc", label: "QC Checkpoint", icon: ShieldCheck },
   { id: "sales", label: "Catatan Penjualan", icon: Wallet },
-  { id: "returns", label: "Catat Retur", icon: Undo2 },
+  { id: "returns", label: "Catatan Retur", icon: Undo2 },
   { id: "master", label: "Kelola Master Data", icon: Database },
 ];
 
@@ -761,310 +761,182 @@ function UserSwitcher({
   );
 }
 
-function CatatReturSection({ currentUser }: { currentUser: string }) {
-  const [products, setProducts] = useState<ProductOption[]>([]);
-  const [stores, setStores] = useState<StoreOption[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState("");
-  const [selectedStore, setSelectedStore] = useState("");
-  const [quantity, setQuantity] = useState(0);
-  const [reason, setReason] = useState("");
-  const [message, setMessage] = useState<FlashMessage | null>(null);
-  const [historyDate, setHistoryDate] = useState(todayStr());
-  const [returnsHistory, setReturnsHistory] = useState<any[]>([]);
-  const [transactionDate, setTransactionDate] = useState(todayStr());
+// Ganti seluruh isi function CatatReturSection (baris 764-1070 di page.tsx)
+// dengan versi ini. Nama function diganti jadi CatatanReturSection --
+// jangan lupa update juga pemanggilannya di bagian render (dekat baris 3421):
+//   {activeSection === "returns" && (
+//     <CatatanReturSection currentUser={currentUser} />
+//   )}
+// dan label di SECTIONS (baris 65) dari "Catat Retur" jadi "Catatan Retur".
 
-  async function loadProductsAndStores() {
-    const { data: productData } = await supabase
-      .from("products")
-      .select("id, full_name, photo_url, stock(available_qty)")
-      .eq("is_active", true)
-      .order("full_name");
-    if (productData) {
-      setProducts(
-        productData.map((p: any) => {
-          const stockRow = Array.isArray(p.stock) ? p.stock[0] : p.stock;
-          return {
-            id: p.id,
-            full_name: p.full_name,
-            photo_url: p.photo_url,
-            stock_qty: stockRow?.available_qty ?? 0,
-          };
-        }),
-      );
-    }
+// formatFullDate yang udah ada cuma buat tanggal polos (YYYY-MM-DD) --
+// status_changed_at itu timestamp lengkap, jadi butuh formatter sendiri
+// biar jam scan-nya ikut kelihatan, bukan cuma tanggal.
+function formatScanTime(iso: string | null) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleString("id-ID", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-    const { data: storeData } = await supabase
-      .from("stores")
-      .select("id, name, code, managed_by")
-      .order("code");
-    if (storeData) setStores(storeData);
-  }
+function CatatanReturSection({ currentUser }: { currentUser: string }) {
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searched, setSearched] = useState(false);
 
-  async function loadReturnsHistory(date: string) {
-    const start = `${date}T00:00:00`;
-    const nextDay = new Date(date);
-    nextDay.setDate(nextDay.getDate() + 1);
-    const end = `${nextDay.toISOString().split("T")[0]}T00:00:00`;
+  async function runSearch(q: string) {
+    const trimmed = q.trim();
+    setLoading(true);
+    setSearched(trimmed.length > 0);
 
-    const { data: returnsData } = await supabase
-      .from("returns")
+    let sb = supabase
+      .from("sales")
       .select(
-        "quantity, reason, returned_at, products(full_name), stores(code)",
+        "id, quantity, awb_number, status_changed_at, products(full_name, photo_url), stores(code)",
       )
-      .gte("returned_at", start)
-      .lt("returned_at", end)
-      .order("returned_at", { ascending: false });
-    setReturnsHistory(returnsData ?? []);
-  }
+      .eq("status", "batal")
+      .order("status_changed_at", { ascending: false });
 
-  useEffect(() => {
-    loadProductsAndStores();
-  }, []);
-
-  useEffect(() => {
-    loadReturnsHistory(historyDate);
-  }, [historyDate]);
-
-  function flash(text: string, type: FlashType = "success") {
-    setMessage({ text, type });
-    setTimeout(() => setMessage(null), 2500);
-  }
-
-  async function handleSave() {
-    if (!selectedProduct || !selectedStore || quantity <= 0) {
-      flash("Pilih toko, produk, dan jumlah dulu", "warning");
-      return;
-    }
-
-    await supabase.from("returns").insert({
-      product_id: selectedProduct,
-      store_id: selectedStore,
-      quantity,
-      reason: reason || null,
-      returned_at: `${transactionDate}T12:00:00`,
-    });
-
-    const { data: stockRow } = await supabase
-      .from("stock")
-      .select("available_qty")
-      .eq("product_id", selectedProduct)
-      .maybeSingle();
-
-    if (stockRow) {
-      await supabase
-        .from("stock")
-        .update({
-          available_qty: stockRow.available_qty + quantity,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("product_id", selectedProduct);
+    if (trimmed) {
+      // Hanya cari ke awb_number -- resi_number khusus Tokopedia/TikTok
+      // isinya Order Id yang berubah jadi "Order No" saat retur, jadi
+      // gak boleh lagi dipakai buat matching fisik paket.
+      sb = sb.ilike("awb_number", `%${trimmed}%`);
     } else {
-      await supabase.from("stock").insert({
-        product_id: selectedProduct,
-        available_qty: quantity,
-      });
+      sb = sb.limit(30);
     }
 
-    flash("Retur tersimpan, stok ditambah!", "success");
-    setQuantity(0);
-    setReason("");
-    setSelectedProduct("");
-    loadProductsAndStores();
-    setTransactionDate(todayStr());
-    if (historyDate === transactionDate) loadReturnsHistory(historyDate);
+    const { data } = await sb;
+    setRows(data ?? []);
+    setLoading(false);
   }
 
-  const myStores = stores.filter((s: any) => s.managed_by === currentUser);
-  const selectedProductData = products.find((p) => p.id === selectedProduct);
-  const isToday = historyDate === todayStr();
+  useEffect(() => {
+    const t = setTimeout(() => runSearch(query), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  // Satu resi bisa punya beberapa baris (multi-produk) -- digabung
+  // jadi satu kartu berdasarkan awb_number.
+  const grouped = Object.values(
+    rows.reduce((acc: Record<string, any>, r: any) => {
+      const key = r.awb_number;
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          display_number: r.awb_number,
+          status_changed_at: r.status_changed_at,
+          store: r.stores,
+          items: [] as any[],
+        };
+      }
+      acc[key].items.push({
+        product: r.products?.full_name,
+        photo: r.products?.photo_url,
+        qty: r.quantity,
+      });
+      return acc;
+    }, {}),
+  );
 
   return (
     <div className="animate-fadeIn">
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
         <span className="w-2 h-2 rounded-full bg-accent-400"></span>
-        Catat Retur
+        Catatan Retur
       </h2>
 
-      <StatusBanner message={message} />
+      <div className="bg-panel border border-line rounded-xl p-5 mb-6">
+        <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
+          <Search size={13} strokeWidth={1.75} className="text-neutral-500" />
+          Cari nomor resi / AWB
+        </label>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="cth: JY1796616363 atau SPXID..."
+          className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+        />
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
-        {/* KIRI: form + grid produk */}
-        <div>
-          <div className="bg-panel border border-line rounded-xl p-5 mb-6 flex items-end gap-4 flex-wrap">
-            <div className="min-w-[180px]">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-                <Store
-                  size={13}
-                  strokeWidth={1.75}
-                  className="text-neutral-500"
-                />
-                Toko
-              </label>
-              <StoreSelect
-                stores={myStores}
-                value={selectedStore}
-                onChange={setSelectedStore}
-              />
-            </div>
+      {loading && (
+        <p className="text-neutral-500 text-sm text-center py-6">Mencari...</p>
+      )}
 
-            <div className="w-36">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium">
-                Tanggal
-              </label>
-              <input
-                type="date"
-                value={transactionDate}
-                max={todayStr()}
-                onChange={(e) => setTransactionDate(e.target.value)}
-                className="w-full bg-black/40 border border-accent-500/40 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-              />
-            </div>
-
-            <div className="min-w-[160px]">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-                <Package
-                  size={13}
-                  strokeWidth={1.75}
-                  className="text-neutral-500"
-                />
-                Produk dipilih
-              </label>
-              <div className="bg-black/20 border border-line/60 rounded-lg px-3 py-2.5 text-sm text-neutral-300 truncate">
-                {selectedProductData
-                  ? selectedProductData.full_name
-                  : "— klik foto —"}
-              </div>
-            </div>
-
-            <div className="w-24">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-                <Hash
-                  size={13}
-                  strokeWidth={1.75}
-                  className="text-neutral-500"
-                />
-                Jumlah
-              </label>
-              <input
-                type="number"
-                value={quantity || ""}
-                onChange={(e) => setQuantity(Number(e.target.value))}
-                className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-              />
-            </div>
-
-            <div className="min-w-[200px] flex-1">
-              <label className="text-xs text-neutral-400 mb-1.5 font-medium">
-                Alasan (opsional)
-              </label>
-              <input
-                type="text"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="cth: salah warna, cacat"
-                className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-              />
-            </div>
-
-            <button
-              onClick={handleSave}
-              className="shine-btn bg-accent-500 hover:bg-accent-400 text-white px-6 py-2.5 rounded-lg font-semibold text-sm transition-colors duration-300 active:scale-95 whitespace-nowrap"
-            >
-              Simpan Retur
-            </button>
-          </div>
-
-          <label className="text-sm text-neutral-300 mb-3 font-medium flex items-center gap-1.5">
-            <Package
-              size={15}
-              strokeWidth={1.75}
-              className="text-neutral-500"
-            />
-            Pilih Produk
-          </label>
-          <div className="max-h-[62vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {products.map((p) => {
-                const isSelected = selectedProduct === p.id;
-                return (
-                  <div key={p.id} className="group relative">
-                    <div className="absolute -inset-1.5 rounded-2xl bg-white/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-                    <button
-                      onClick={() => setSelectedProduct(p.id)}
-                      className={`relative w-full text-left bg-panel border rounded-xl overflow-hidden transition-all duration-300 group-hover:-translate-y-0.5 ${
-                        isSelected
-                          ? "border-accent-500 ring-2 ring-accent-500/40"
-                          : "border-line group-hover:border-neutral-500"
-                      }`}
-                    >
-                      {p.photo_url && (
-                        <img
-                          src={p.photo_url}
-                          alt={p.full_name}
-                          className="w-full aspect-video object-cover"
-                        />
-                      )}
-                      <div className="p-2">
-                        <p className="text-xs text-neutral-300 truncate">
-                          {p.full_name}
-                        </p>
-                        <p className="text-[11px] text-neutral-500">
-                          {p.stock_qty} pcs
-                        </p>
-                      </div>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+      {!loading && searched && grouped.length === 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl p-5 text-sm flex items-center gap-2.5">
+          <AlertTriangle size={16} strokeWidth={2} className="shrink-0" />
+          Resi &quot;{query}&quot; belum tercatat balik -- belum discan, atau
+          coba cek lagi apakah hilang di jalan.
         </div>
+      )}
 
-        {/* KANAN: riwayat retur + kalender */}
-        <div className="bg-panel border border-line rounded-xl p-4 lg:sticky lg:top-20">
-          <h3 className="text-sm tracking-wide text-neutral-300 font-medium mb-3 flex items-center gap-1.5">
-            <ClipboardList size={15} strokeWidth={1.75} />
-            {isToday ? "Retur Hari Ini" : "Retur"}
-          </h3>
+      {!loading && !searched && grouped.length === 0 && (
+        <p className="text-neutral-500 text-sm text-center py-10">
+          Belum ada retur yang tercatat. Nanti otomatis muncul di sini begitu
+          scanner retur mulai dipakai.
+        </p>
+      )}
 
-          <input
-            type="date"
-            value={historyDate}
-            max={todayStr()}
-            onChange={(e) => setHistoryDate(e.target.value)}
-            className="w-full bg-black/40 border border-accent-500/40 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
-          />
-
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {returnsHistory.map((r, i) => (
+      {!loading && grouped.length > 0 && (
+        <div>
+          {!searched && (
+            <p className="text-xs text-neutral-500 mb-3">30 retur terakhir</p>
+          )}
+          <div className="space-y-3">
+            {grouped.map((g: any) => (
               <div
-                key={i}
-                className="bg-black/20 border border-line/60 rounded-lg px-3 py-2.5 text-xs"
+                key={g.key}
+                className="bg-panel border border-line rounded-xl p-4"
               >
-                <p className="text-neutral-200 truncate">
-                  {r.products?.full_name}
-                </p>
-                <div className="flex justify-between mt-1 text-neutral-500">
-                  <span>
-                    <span className="text-neutral-300 font-medium">
-                      {r.quantity} pcs
-                    </span>{" "}
-                    ({r.stores?.code})
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2
+                      size={15}
+                      strokeWidth={2}
+                      className="text-emerald-400 shrink-0"
+                    />
+                    <span className="font-mono text-sm text-neutral-100">
+                      {g.display_number}
+                    </span>
+                  </div>
+                  <span className="text-xs text-neutral-500">
+                    {g.store?.code ?? "-"} ·{" "}
+                    {formatScanTime(g.status_changed_at)}
                   </span>
                 </div>
-                {r.reason && (
-                  <p className="text-neutral-500 mt-1 italic">{r.reason}</p>
-                )}
+                <div className="space-y-1.5">
+                  {g.items.map((it: any, i: number) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2.5 text-xs text-neutral-400"
+                    >
+                      {it.photo && (
+                        <img
+                          src={it.photo}
+                          alt={it.product}
+                          className="w-8 h-8 rounded object-cover shrink-0"
+                        />
+                      )}
+                      <span className="truncate">{it.product}</span>
+                      <span className="text-neutral-500 ml-auto shrink-0">
+                        {it.qty} pcs
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
-            {returnsHistory.length === 0 && (
-              <p className="text-neutral-500 text-sm text-center py-6">
-                Belum ada retur{isToday ? " hari ini" : " di tanggal ini"}
-              </p>
-            )}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -3419,7 +3291,7 @@ export default function AdminPage() {
             <CatatanPenjualanSection currentUser={currentUser} />
           )}
           {activeSection === "returns" && (
-            <CatatReturSection currentUser={currentUser} />
+            <CatatanReturSection currentUser={currentUser} />
           )}
           {activeSection === "master" && (
             <MasterDataSection currentUser={currentUser} />
