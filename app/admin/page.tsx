@@ -514,6 +514,29 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
 
   const totalQty = filteredHistory.reduce((sum, s) => sum + s.quantity, 0);
 
+  // Satu resi bisa punya beberapa produk berbeda -- digabung jadi satu
+  // kartu berdasarkan resi_number, sama pola-nya kayak Catatan Retur.
+  const grouped = Object.values(
+    filteredHistory.reduce((acc: Record<string, any>, s: any, idx: number) => {
+      const key = s.resi_number || `no-resi-${idx}`;
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          resi_number: s.resi_number,
+          store: s.stores?.code,
+          sold_at: s.sold_at,
+          items: [] as any[],
+        };
+      }
+      acc[key].items.push({
+        product: s.products?.full_name ?? "(produk tidak ditemukan)",
+        photo: s.products?.photo_url,
+        qty: s.quantity,
+      });
+      return acc;
+    }, {}),
+  );
+
   return (
     <div className="animate-fadeIn">
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
@@ -589,46 +612,23 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
           <span className="text-accent-400 font-semibold tabular-nums">
             {totalQty} pcs
           </span>{" "}
-          dari {filteredHistory.length} transaksi
+          dari {grouped.length} resi
         </div>
       )}
 
-      {/* List transaksi */}
+      {/* List transaksi -- dikelompokkan per resi */}
       <div className="space-y-2">
-        {filteredHistory.map((s, i) => (
+        {grouped.map((g: any) => (
           <div
-            key={i}
-            className="bg-panel border border-line rounded-xl p-3 flex items-center gap-3 hover:border-accent-500/50 transition-colors duration-200"
+            key={g.key}
+            className="bg-panel border border-line rounded-xl p-3 hover:border-accent-500/50 transition-colors duration-200"
           >
-            {s.products?.photo_url ? (
-              <img
-                src={s.products.photo_url}
-                alt={s.products?.full_name}
-                className="w-24 aspect-video rounded-lg object-cover shrink-0"
-              />
-            ) : (
-              <div className="w-24 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
-                <Package
-                  size={18}
-                  strokeWidth={1.5}
-                  className="text-neutral-600"
-                />
-              </div>
-            )}
-
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-neutral-100 truncate">
-                {s.products?.full_name ?? "(produk tidak ditemukan)"}
-              </p>
-              <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 flex-wrap">
-                <span className="text-neutral-300 font-medium">
-                  {s.quantity} pcs
-                </span>
-                <span>·</span>
-                <span>{s.stores?.code}</span>
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-2 text-xs text-neutral-500">
+                <span>{g.store}</span>
                 <span>·</span>
                 <span>
-                  {new Date(s.sold_at).toLocaleString("id-ID", {
+                  {new Date(g.sold_at).toLocaleString("id-ID", {
                     day: "2-digit",
                     month: "2-digit",
                     hour: "2-digit",
@@ -636,20 +636,48 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
                   })}
                 </span>
               </div>
+
+              <button
+                onClick={() => g.resi_number && copyResi(g.resi_number)}
+                className="shrink-0 text-right group"
+                title="Klik untuk salin nomor resi"
+              >
+                <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
+                  {copiedResi === g.resi_number ? "Tersalin!" : "No. Resi"}
+                </p>
+                <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
+                  {g.resi_number ?? "-"}
+                </p>
+              </button>
             </div>
 
-            <button
-              onClick={() => s.resi_number && copyResi(s.resi_number)}
-              className="shrink-0 text-right group"
-              title="Klik untuk salin nomor resi"
-            >
-              <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
-                {copiedResi === s.resi_number ? "Tersalin!" : "No. Resi"}
-              </p>
-              <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
-                {s.resi_number ?? "-"}
-              </p>
-            </button>
+            <div className="space-y-1.5">
+              {g.items.map((it: any, i: number) => (
+                <div key={i} className="flex items-center gap-3">
+                  {it.photo ? (
+                    <img
+                      src={it.photo}
+                      alt={it.product}
+                      className="w-24 aspect-video rounded-lg object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-24 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
+                      <Package
+                        size={18}
+                        strokeWidth={1.5}
+                        className="text-neutral-600"
+                      />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-neutral-100 truncate">
+                      {it.product}
+                    </p>
+                    <p className="text-xs text-neutral-500">{it.qty} pcs</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         ))}
 
@@ -783,11 +811,29 @@ function formatScanTime(iso: string | null) {
   });
 }
 
+// Jaga-jaga relasi stores ke-infer sebagai array (kasus yang sama kayak
+// di /scan dan /produksi) -- selalu ambil satu object apapun bentuknya.
+function normalizeStore(
+  storeField: any,
+): { code?: string; managed_by?: string } | undefined {
+  return Array.isArray(storeField) ? storeField[0] : storeField;
+}
+
 function CatatanReturSection({ currentUser }: { currentUser: string }) {
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searched, setSearched] = useState(false);
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeFilter, setStoreFilter] = useState("");
+
+  async function loadStores() {
+    const { data } = await supabase
+      .from("stores")
+      .select("id, name, code, managed_by")
+      .order("code");
+    if (data) setStores(data);
+  }
 
   async function runSearch(q: string) {
     const trimmed = q.trim();
@@ -797,7 +843,7 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
     let sb = supabase
       .from("sales")
       .select(
-        "id, quantity, awb_number, status_changed_at, products(full_name, photo_url), stores(code)",
+        "id, quantity, awb_number, status_changed_at, products(full_name, photo_url), stores(code, managed_by)",
       )
       .eq("status", "batal")
       .order("status_changed_at", { ascending: false });
@@ -808,31 +854,46 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
       // gak boleh lagi dipakai buat matching fisik paket.
       sb = sb.ilike("awb_number", `%${trimmed}%`);
     } else {
-      sb = sb.limit(30);
+      sb = sb.limit(50);
     }
 
     const { data } = await sb;
-    setRows(data ?? []);
+    // Tiap admin cuma lihat retur dari toko yang dia kelola sendiri --
+    // sama persis polanya kayak Catatan Penjualan.
+    const scoped = (data ?? []).filter(
+      (r: any) => normalizeStore(r.stores)?.managed_by === currentUser,
+    );
+    setRows(scoped);
     setLoading(false);
   }
+
+  useEffect(() => {
+    loadStores();
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => runSearch(query), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, currentUser]);
+
+  const myStores = stores.filter((s: any) => s.managed_by === currentUser);
+
+  const filteredRows = storeFilter
+    ? rows.filter((r: any) => normalizeStore(r.stores)?.code === storeFilter)
+    : rows;
 
   // Satu resi bisa punya beberapa baris (multi-produk) -- digabung
   // jadi satu kartu berdasarkan awb_number.
   const grouped = Object.values(
-    rows.reduce((acc: Record<string, any>, r: any) => {
+    filteredRows.reduce((acc: Record<string, any>, r: any) => {
       const key = r.awb_number;
       if (!acc[key]) {
         acc[key] = {
           key,
           display_number: r.awb_number,
           status_changed_at: r.status_changed_at,
-          store: r.stores,
+          store: normalizeStore(r.stores),
           items: [] as any[],
         };
       }
@@ -852,18 +913,39 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
         Catatan Retur
       </h2>
 
-      <div className="bg-panel border border-line rounded-xl p-5 mb-6">
-        <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-          <Search size={13} strokeWidth={1.75} className="text-neutral-500" />
-          Cari nomor resi / AWB
-        </label>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="cth: JY1796616363 atau SPXID..."
-          className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-        />
+      <div className="bg-panel border border-line rounded-xl p-5 mb-6 flex items-end gap-4 flex-wrap">
+        <div className="min-w-[220px] flex-1">
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
+            <Search size={13} strokeWidth={1.75} className="text-neutral-500" />
+            Cari nomor resi / AWB
+          </label>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="cth: JY1796616363 atau SPXID..."
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+          />
+        </div>
+
+        <div className="min-w-[200px]">
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
+            <Store size={13} strokeWidth={1.75} className="text-neutral-500" />
+            Toko
+          </label>
+          <select
+            value={storeFilter}
+            onChange={(e) => setStoreFilter(e.target.value)}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+          >
+            <option value="">Semua Toko Saya</option>
+            {myStores.map((s: any) => (
+              <option key={s.id} value={s.code}>
+                {s.code} — {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {loading && (
@@ -888,7 +970,11 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
       {!loading && grouped.length > 0 && (
         <div>
           {!searched && (
-            <p className="text-xs text-neutral-500 mb-3">30 retur terakhir</p>
+            <p className="text-xs text-neutral-500 mb-3">
+              {storeFilter
+                ? `Retur terakhir · ${storeFilter}`
+                : "Retur terakhir dari semua toko saya"}
+            </p>
           )}
           <div className="space-y-3">
             {grouped.map((g: any) => (
@@ -912,18 +998,20 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
                     {formatScanTime(g.status_changed_at)}
                   </span>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {g.items.map((it: any, i: number) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2.5 text-xs text-neutral-400"
+                      className="flex items-center gap-3 text-xs text-neutral-400"
                     >
-                      {it.photo && (
+                      {it.photo ? (
                         <img
                           src={it.photo}
                           alt={it.product}
-                          className="w-8 h-8 rounded object-cover shrink-0"
+                          className="w-24 aspect-video rounded-lg object-cover shrink-0"
                         />
+                      ) : (
+                        <div className="w-24 aspect-video rounded-lg bg-black/30 shrink-0" />
                       )}
                       <span className="truncate">{it.product}</span>
                       <span className="text-neutral-500 ml-auto shrink-0">
