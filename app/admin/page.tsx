@@ -3266,7 +3266,7 @@ function ObrolanSection({
           <h2 className="text-lg font-semibold text-neutral-100">Diskusi</h2>
           <p className="text-xs text-neutral-500 mt-1">
             Sampaikan masukan atau diskusikan pengembangan sistem ini bersama
-            tim.
+            tim ya.
           </p>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-neutral-500 shrink-0">
@@ -3277,7 +3277,9 @@ function ObrolanSection({
           />
           {partner} {partnerOnline ? "online" : "offline"}
         </div>
+      </div>
 
+      <div className="flex-1 overflow-y-auto rounded-lg border border-line bg-panel/50 p-4 space-y-3">
         {messages.map((m, i) => {
           const mine = m.sender === currentUser;
           const prev = messages[i - 1];
