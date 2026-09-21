@@ -2125,21 +2125,23 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
               {supplies.map((s) => (
                 <div
                   key={s.id}
-                  className="bg-panel border border-line rounded-xl px-4 py-3.5"
+                  className="group bg-panel border border-line rounded-xl px-4 py-3.5 transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/40 hover:shadow-[0_8px_24px_-8px_rgba(16,185,129,0.25)]"
                 >
-                  <div className="flex justify-between mb-2.5">
-                    <p className="font-medium text-sm text-neutral-100">
-                      {s.name}
-                    </p>
-                    <p className="text-sm text-neutral-500">
-                      Stok: {s.current_qty} {s.unit}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="text-xs text-neutral-500 truncate mb-1">
+                    {s.name}
+                  </p>
+                  <p className="text-2xl font-semibold tabular-nums text-neutral-50 leading-tight mb-3 transition-all duration-300 group-hover:text-emerald-300 group-hover:drop-shadow-[0_0_12px_rgba(52,211,153,0.6)]">
+                    {s.current_qty}
+                    <span className="text-sm font-normal text-neutral-500 ml-1.5">
+                      {s.unit}
+                    </span>
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/5">
                     <input
                       type="number"
                       placeholder="0"
-                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-emerald-500"
+                      className="w-14 bg-black/40 border border-line rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-emerald-500"
                       value={supplyAddInputs[s.id] || ""}
                       onChange={(e) =>
                         setSupplyAddInputs((prev) => ({
@@ -2150,14 +2152,17 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
                     />
                     <button
                       onClick={() => handleAddSupply(s)}
-                      className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm px-3 py-2 rounded-lg hover:bg-emerald-500/30 transition-colors"
+                      className="text-emerald-400 border border-emerald-500/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-emerald-500/10 transition-colors"
                     >
-                      Tambah
+                      + Tambah
                     </button>
+
+                    <span className="w-px h-5 bg-line mx-0.5" />
+
                     <input
                       type="text"
                       placeholder="Alasan"
-                      className="w-24 bg-black/40 border border-line rounded-lg px-2 py-2 text-xs focus:outline-none focus:border-red-500"
+                      className="w-20 bg-black/40 border border-line rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-red-500"
                       value={supplyReduceReasons[s.id] || ""}
                       onChange={(e) =>
                         setSupplyReduceReasons((prev) => ({
@@ -2169,7 +2174,7 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
                     <input
                       type="number"
                       placeholder="0"
-                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-red-500"
+                      className="w-14 bg-black/40 border border-line rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-red-500"
                       value={supplyReduceInputs[s.id] || ""}
                       onChange={(e) =>
                         setSupplyReduceInputs((prev) => ({
@@ -2180,9 +2185,9 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
                     />
                     <button
                       onClick={() => handleReduceSupply(s)}
-                      className="bg-red-500/20 text-red-400 border border-red-500/30 text-sm px-3 py-2 rounded-lg hover:bg-red-500/30 transition-colors"
+                      className="text-red-400 border border-red-500/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
                     >
-                      Kurangi
+                      − Kurangi
                     </button>
                   </div>
                 </div>
@@ -2198,21 +2203,23 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
               {pins.map((p) => (
                 <div
                   key={p.id}
-                  className="bg-panel border border-line rounded-xl px-4 py-3.5"
+                  className="group bg-panel border border-line rounded-xl px-4 py-3.5 transition-all duration-300 hover:-translate-y-1 hover:border-emerald-500/40 hover:shadow-[0_8px_24px_-8px_rgba(16,185,129,0.25)]"
                 >
-                  <div className="flex justify-between mb-2.5">
-                    <p className="font-medium text-sm text-neutral-100">
-                      {p.name}
-                    </p>
-                    <p className="text-sm text-neutral-500">
-                      Stok baik: {p.available_qty}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="text-xs text-neutral-500 truncate mb-1">
+                    {p.name}
+                  </p>
+                  <p className="text-2xl font-semibold tabular-nums text-neutral-50 leading-tight mb-3 transition-all duration-300 group-hover:text-emerald-300 group-hover:drop-shadow-[0_0_12px_rgba(52,211,153,0.6)]">
+                    {p.available_qty}
+                    <span className="text-sm font-normal text-neutral-500 ml-1.5">
+                      pcs baik
+                    </span>
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/5">
                     <input
                       type="number"
-                      placeholder="Beli"
-                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-emerald-500"
+                      placeholder="0"
+                      className="w-14 bg-black/40 border border-line rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-emerald-500"
                       value={pinBuyInputs[p.id] || ""}
                       onChange={(e) =>
                         setPinBuyInputs((prev) => ({
@@ -2223,14 +2230,17 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
                     />
                     <button
                       onClick={() => handleBuyPin(p)}
-                      className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm px-3 py-2 rounded-lg hover:bg-emerald-500/30 transition-colors"
+                      className="text-emerald-400 border border-emerald-500/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-emerald-500/10 transition-colors"
                     >
-                      Beli
+                      + Beli
                     </button>
+
+                    <span className="w-px h-5 bg-line mx-0.5" />
+
                     <input
                       type="number"
-                      placeholder="Cacat"
-                      className="w-16 bg-black/40 border border-line rounded-lg px-2 py-2 text-center text-sm focus:outline-none focus:border-red-500"
+                      placeholder="0"
+                      className="w-14 bg-black/40 border border-line rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-red-500"
                       value={pinDefectInputs[p.id] || ""}
                       onChange={(e) =>
                         setPinDefectInputs((prev) => ({
@@ -2241,9 +2251,9 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
                     />
                     <button
                       onClick={() => handleDefectPin(p)}
-                      className="bg-red-500/20 text-red-400 border border-red-500/30 text-sm px-3 py-2 rounded-lg hover:bg-red-500/30 transition-colors"
+                      className="text-red-400 border border-red-500/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
                     >
-                      Cacat
+                      − Cacat
                     </button>
                   </div>
                 </div>

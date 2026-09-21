@@ -908,67 +908,70 @@ export default function IbuBosPage() {
                 {supplies.map((s) => (
                   <div
                     key={s.id}
-                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-[#151A18] border border-[#262E2A] rounded-xl px-4 py-3.5 hover:border-[#39FF88]/30 transition-colors"
+                    className="group bg-[#151A18] border border-[#262E2A] rounded-xl px-4 py-3.5 transition-all duration-300 hover:-translate-y-1 hover:border-[#39FF88]/40 hover:shadow-[0_8px_24px_-8px_rgba(57,255,136,0.25)]"
                   >
-                    <div>
-                      <p className="font-medium">{s.name}</p>
-                      <p className="text-sm text-[#8FA39A]">
-                        Stok: {s.current_qty} {s.unit}
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-2 items-start sm:items-end">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
-                          value={supplyInputs[s.id] || ""}
-                          onChange={(e) =>
-                            setSupplyInputs((prev) => ({
-                              ...prev,
-                              [s.id]: Number(e.target.value),
-                            }))
-                          }
-                          placeholder="0"
-                        />
-                        <button
-                          onClick={() => handleAddSupply(s)}
-                          className="bg-[#39FF88]/70 text-[#0B0D0C] font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#39FF88] hover:shadow-[0_0_12px_rgba(57,255,136,0.4)]"
-                        >
-                          Tambah
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          className="w-28 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
-                          placeholder="Alasan (opsional)"
-                          value={supplyReduceReasons[s.id] || ""}
-                          onChange={(e) =>
-                            setSupplyReduceReasons((prev) => ({
-                              ...prev,
-                              [s.id]: e.target.value,
-                            }))
-                          }
-                        />
-                        <input
-                          type="number"
-                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
-                          value={supplyReduceInputs[s.id] || ""}
-                          onChange={(e) =>
-                            setSupplyReduceInputs((prev) => ({
-                              ...prev,
-                              [s.id]: Number(e.target.value),
-                            }))
-                          }
-                          placeholder="0"
-                        />
-                        <button
-                          onClick={() => handleReduceSupply(s)}
-                          className="bg-[#FF5470]/20 text-[#FF5470] border border-[#FF5470]/40 font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#FF5470]/30"
-                        >
-                          Kurangi
-                        </button>
-                      </div>
+                    <p className="text-xs text-[#8FA39A] truncate mb-1">
+                      {s.name}
+                    </p>
+                    <p className="text-2xl font-semibold tabular-nums text-[#EAF2EE] leading-tight mb-3 transition-all duration-300 group-hover:text-[#39FF88] group-hover:drop-shadow-[0_0_12px_rgba(57,255,136,0.6)]">
+                      {s.current_qty}
+                      <span className="text-sm font-normal text-[#8FA39A] ml-1.5">
+                        {s.unit}
+                      </span>
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/5">
+                      <input
+                        type="number"
+                        className="w-14 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
+                        value={supplyInputs[s.id] || ""}
+                        onChange={(e) =>
+                          setSupplyInputs((prev) => ({
+                            ...prev,
+                            [s.id]: Number(e.target.value),
+                          }))
+                        }
+                        placeholder="0"
+                      />
+                      <button
+                        onClick={() => handleAddSupply(s)}
+                        className="text-[#39FF88] border border-[#39FF88]/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-[#39FF88]/10 transition-colors"
+                      >
+                        + Tambah
+                      </button>
+
+                      <span className="w-px h-5 bg-white/10 mx-0.5" />
+
+                      <input
+                        type="text"
+                        className="w-24 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
+                        placeholder="Alasan (opsional)"
+                        value={supplyReduceReasons[s.id] || ""}
+                        onChange={(e) =>
+                          setSupplyReduceReasons((prev) => ({
+                            ...prev,
+                            [s.id]: e.target.value,
+                          }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        className="w-14 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
+                        value={supplyReduceInputs[s.id] || ""}
+                        onChange={(e) =>
+                          setSupplyReduceInputs((prev) => ({
+                            ...prev,
+                            [s.id]: Number(e.target.value),
+                          }))
+                        }
+                        placeholder="0"
+                      />
+                      <button
+                        onClick={() => handleReduceSupply(s)}
+                        className="text-[#FF5470] border border-[#FF5470]/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-[#FF5470]/10 transition-colors"
+                      >
+                        − Kurangi
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -983,55 +986,58 @@ export default function IbuBosPage() {
                 {pins.map((p) => (
                   <div
                     key={p.id}
-                    className="bg-[#151A18] border border-[#262E2A] rounded-xl px-4 py-3.5 hover:border-[#39FF88]/30 transition-colors"
+                    className="group bg-[#151A18] border border-[#262E2A] rounded-xl px-4 py-3.5 transition-all duration-300 hover:-translate-y-1 hover:border-[#39FF88]/40 hover:shadow-[0_8px_24px_-8px_rgba(57,255,136,0.25)]"
                   >
-                    <div className="flex justify-between mb-2.5">
-                      <p className="font-medium">{p.name}</p>
-                      <p className="text-sm text-[#8FA39A]">
-                        Stok baik: {p.available_qty}
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
-                          placeholder="Beli"
-                          value={pinBuyInputs[p.id] || ""}
-                          onChange={(e) =>
-                            setPinBuyInputs((prev) => ({
-                              ...prev,
-                              [p.id]: Number(e.target.value),
-                            }))
-                          }
-                        />
-                        <button
-                          onClick={() => handleBuyPin(p)}
-                          className="bg-[#39FF88]/70 text-[#0B0D0C] font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#39FF88] hover:shadow-[0_0_12px_rgba(57,255,136,0.4)]"
-                        >
-                          Beli
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          className="w-16 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
-                          placeholder="Cacat"
-                          value={pinDefectInputs[p.id] || ""}
-                          onChange={(e) =>
-                            setPinDefectInputs((prev) => ({
-                              ...prev,
-                              [p.id]: Number(e.target.value),
-                            }))
-                          }
-                        />
-                        <button
-                          onClick={() => handleDefectPin(p)}
-                          className="bg-[#FF5470]/20 text-[#FF5470] border border-[#FF5470]/40 font-semibold text-sm px-4 py-2 rounded-lg transition-all duration-300 hover:bg-[#FF5470]/30"
-                        >
-                          Cacat
-                        </button>
-                      </div>
+                    <p className="text-xs text-[#8FA39A] truncate mb-1">
+                      {p.name}
+                    </p>
+                    <p className="text-2xl font-semibold tabular-nums text-[#EAF2EE] leading-tight mb-3 transition-all duration-300 group-hover:text-[#39FF88] group-hover:drop-shadow-[0_0_12px_rgba(57,255,136,0.6)]">
+                      {p.available_qty}
+                      <span className="text-sm font-normal text-[#8FA39A] ml-1.5">
+                        pcs baik
+                      </span>
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-white/5">
+                      <input
+                        type="number"
+                        className="w-14 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-[#39FF88] focus:ring-1 focus:ring-[#39FF88]"
+                        placeholder="0"
+                        value={pinBuyInputs[p.id] || ""}
+                        onChange={(e) =>
+                          setPinBuyInputs((prev) => ({
+                            ...prev,
+                            [p.id]: Number(e.target.value),
+                          }))
+                        }
+                      />
+                      <button
+                        onClick={() => handleBuyPin(p)}
+                        className="text-[#39FF88] border border-[#39FF88]/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-[#39FF88]/10 transition-colors"
+                      >
+                        + Beli
+                      </button>
+
+                      <span className="w-px h-5 bg-white/10 mx-0.5" />
+
+                      <input
+                        type="number"
+                        className="w-14 bg-[#0B0D0C] border border-[#262E2A] rounded-lg px-2 py-1.5 text-center text-sm focus:outline-none focus:border-[#FF5470] focus:ring-1 focus:ring-[#FF5470]"
+                        placeholder="0"
+                        value={pinDefectInputs[p.id] || ""}
+                        onChange={(e) =>
+                          setPinDefectInputs((prev) => ({
+                            ...prev,
+                            [p.id]: Number(e.target.value),
+                          }))
+                        }
+                      />
+                      <button
+                        onClick={() => handleDefectPin(p)}
+                        className="text-[#FF5470] border border-[#FF5470]/40 text-xs font-medium px-2.5 py-1.5 rounded-lg hover:bg-[#FF5470]/10 transition-colors"
+                      >
+                        − Cacat
+                      </button>
                     </div>
                   </div>
                 ))}
