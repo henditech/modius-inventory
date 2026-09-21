@@ -36,6 +36,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   PieChart,
   Pie,
   Cell,
@@ -821,17 +822,6 @@ function UserSwitcher({
   );
 }
 
-// Ganti seluruh isi function CatatReturSection (baris 764-1070 di page.tsx)
-// dengan versi ini. Nama function diganti jadi CatatanReturSection --
-// jangan lupa update juga pemanggilannya di bagian render (dekat baris 3421):
-//   {activeSection === "returns" && (
-//     <CatatanReturSection currentUser={currentUser} />
-//   )}
-// dan label di SECTIONS (baris 65) dari "Catat Retur" jadi "Catatan Retur".
-
-// formatFullDate yang udah ada cuma buat tanggal polos (YYYY-MM-DD) --
-// status_changed_at itu timestamp lengkap, jadi butuh formatter sendiri
-// biar jam scan-nya ikut kelihatan, bukan cuma tanggal.
 function formatScanTime(iso: string | null) {
   if (!iso) return "-";
   return new Date(iso).toLocaleString("id-ID", {
@@ -843,8 +833,6 @@ function formatScanTime(iso: string | null) {
   });
 }
 
-// Jaga-jaga relasi stores ke-infer sebagai array (kasus yang sama kayak
-// di /scan dan /produksi) -- selalu ambil satu object apapun bentuknya.
 function normalizeStore(
   storeField: any,
 ): { code?: string; managed_by?: string } | undefined {
@@ -881,17 +869,12 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
       .order("status_changed_at", { ascending: false });
 
     if (trimmed) {
-      // Hanya cari ke awb_number -- resi_number khusus Tokopedia/TikTok
-      // isinya Order Id yang berubah jadi "Order No" saat retur, jadi
-      // gak boleh lagi dipakai buat matching fisik paket.
       sb = sb.ilike("awb_number", `%${trimmed}%`);
     } else {
       sb = sb.limit(50);
     }
 
     const { data } = await sb;
-    // Tiap admin cuma lihat retur dari toko yang dia kelola sendiri --
-    // sama persis polanya kayak Catatan Penjualan.
     const scoped = (data ?? []).filter(
       (r: any) => normalizeStore(r.stores)?.managed_by === currentUser,
     );
@@ -906,7 +889,6 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
   useEffect(() => {
     const t = setTimeout(() => runSearch(query), 300);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, currentUser]);
 
   const myStores = stores.filter((s: any) => s.managed_by === currentUser);
@@ -915,8 +897,6 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
     ? rows.filter((r: any) => normalizeStore(r.stores)?.code === storeFilter)
     : rows;
 
-  // Satu resi bisa punya beberapa baris (multi-produk) -- digabung
-  // jadi satu kartu berdasarkan awb_number.
   const grouped = Object.values(
     filteredRows.reduce((acc: Record<string, any>, r: any) => {
       const key = r.awb_number;
@@ -1067,7 +1047,9 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     menipis: 0,
     kritis: 0,
   });
-  const [trend, setTrend] = useState<{ date: string; total: number }[]>([]);
+  const [trend, setTrend] = useState<
+    { date: string; total: number; returned: number }[]
+  >([]);
   const [topProducts, setTopProducts] = useState<
     {
       name: string;
@@ -1137,12 +1119,17 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     const reference = new Date(`${referenceDateStr}T12:00:00`);
 
     // 1. Bangun 14 hari berturut-turut menggunakan Map (seperti Ibu Bos)
-    const days: { key: string; label: string; total: number }[] = [];
+    const days: {
+      key: string;
+      label: string;
+      total: number;
+      returned: number;
+    }[] = [];
     for (let i = 13; i >= 0; i--) {
       const d = new Date(reference);
       d.setDate(d.getDate() - i);
       const key = d.toISOString().split("T")[0];
-      days.push({ key, label: shortLabel(key), total: 0 });
+      days.push({ key, label: shortLabel(key), total: 0, returned: 0 });
     }
     const dayMap = new Map(days.map((d) => [d.key, d]));
 
@@ -1155,9 +1142,6 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     end.setDate(end.getDate() + 1);
     end.setHours(0, 0, 0, 0);
 
-    // Sertakan products(id, full_name, photo_url) -- id dipakai buat
-    // ngelompokkan penjualan per produk secara aman (bukan per nama teks),
-    // photo_url dipakai buat tampilan ranking foto di Produk Terlaris.
     const { data: rawSalesData } = await supabase
       .from("sales")
       .select(
@@ -1166,17 +1150,22 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
       .gte("sold_at", start.toISOString())
       .lt("sold_at", end.toISOString());
 
+    const { data: rawReturnsData } = await supabase
+      .from("sales")
+      .select("quantity, status_changed_at, stores(managed_by)")
+      .eq("status", "batal")
+      .gte("status_changed_at", start.toISOString())
+      .lt("status_changed_at", end.toISOString());
+
+    const returnsData = (rawReturnsData ?? []).filter(
+      (r: any) => r.stores?.managed_by === currentUser,
+    );
+
     const { data: rawStores } = await supabase
       .from("stores")
       .select("id, name, code, managed_by")
       .order("code");
 
-    // Overview di-scope per admin: masing-masing cuma lihat toko yang dia
-    // kelola sendiri, biar fokus dan gak campur sama toko admin lain.
-    // Filter ini jadi sumber tunggal untuk SEMUA ringkasan di bawah --
-    // trend, produk terlaris, dan kesehatan toko -- karena semuanya
-    // dihitung dari salesData & allStores yang sama-sama udah difilter
-    // di sini, bukan dihitung ulang per bagian.
     const allStores = (rawStores ?? []).filter(
       (s: any) => s.managed_by === currentUser,
     );
@@ -1213,10 +1202,6 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
         last7Total += s.quantity;
       }
 
-      // Dikelompokkan per product_id (bukan per nama teks) -- lebih aman
-      // kalau suatu saat ada 2 produk beda dengan nama yang kebetulan
-      // sama/mirip. photo_url ikut disimpan sekali di sini, dan current
-      // vs previous dihitung bareng qty total, dipakai buat badge "Naik".
       const productId = s.products?.id ?? "unknown";
       const name = s.products?.full_name ?? "?";
       const photoUrl = s.products?.photo_url ?? null;
@@ -1241,7 +1226,17 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
       }
     });
 
-    setTrend(days.map((d) => ({ date: d.key, total: d.total })));
+    returnsData.forEach((r: any) => {
+      const dayKey = (r.status_changed_at as string).split("T")[0];
+      const targetDay = dayMap.get(dayKey);
+      if (targetDay) {
+        (targetDay as any).returned += r.quantity;
+      }
+    });
+
+    setTrend(
+      days.map((d) => ({ date: d.key, total: d.total, returned: d.returned })),
+    );
     setSalesLast7(last7Total);
 
     const ranked = Object.values(byProduct)
@@ -1441,13 +1436,29 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
                 />
                 <Tooltip
                   {...CHART_TOOLTIP_STYLE}
-                  itemStyle={{ color: "#7c96ff" }}
-                  formatter={(value) => [`${value} pcs`, "Terjual"]}
+                  formatter={(value: any, name: any) => [
+                    `${value} pcs`,
+                    name === "total" ? "Terjual" : "Retur",
+                  ]}
+                />
+                <Legend
+                  formatter={(value) =>
+                    value === "total" ? "Terjual" : "Retur"
+                  }
+                  wrapperStyle={{ fontSize: 12 }}
                 />
                 <Line
                   type="monotone"
                   dataKey="total"
                   stroke="#5b7fff"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="returned"
+                  stroke="#fb7185"
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}

@@ -20,6 +20,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   PieChart,
   Pie,
   Cell,
@@ -35,8 +36,13 @@ type Product = {
   photo_url: string | null;
   stock_qty: number;
 };
-type SalesDay = { key: string; label: string; qty: number };
-type TopProduct = { name: string; short: string; qty: number };
+type SalesDay = { key: string; label: string; qty: number; returned: number };
+type TopProduct = {
+  id: string;
+  name: string;
+  photo_url: string | null;
+  qty: number;
+};
 type Section = "overview" | "topi" | "pelengkap";
 
 const NAV: { id: Section; label: string; icon: LucideIcon }[] = [
@@ -120,6 +126,30 @@ const CHART_TOOLTIP_STYLE = {
   },
   labelStyle: { color: "#8FA39A" },
 };
+
+const TOP_RANK_STYLE = [
+  {
+    ring: "ring-[#39FF88]/70",
+    bar: "from-[#39FF88] to-[#1fae5c]",
+    glow: "shadow-[0_0_10px_rgba(57,255,136,0.5)]",
+    badge: "\u{1F451}", // 👑
+    num: "text-[#39FF88]",
+  },
+  {
+    ring: "ring-[#C7D6CE]/50",
+    bar: "from-[#C7D6CE] to-[#8FA39A]",
+    glow: "",
+    badge: null,
+    num: "text-[#C7D6CE]",
+  },
+  {
+    ring: "ring-[#D89A5C]/60",
+    bar: "from-[#D89A5C] to-[#A9662E]",
+    glow: "",
+    badge: null,
+    num: "text-[#D89A5C]",
+  },
+];
 
 export default function IbuBosPage() {
   const [activeSection, setActiveSection] = useState<Section>("overview");
@@ -207,7 +237,7 @@ export default function IbuBosPage() {
       const d = new Date(reference);
       d.setDate(d.getDate() - i);
       const key = isoDate(d);
-      days.push({ key, label: shortLabel(key), qty: 0 });
+      days.push({ key, label: shortLabel(key), qty: 0, returned: 0 });
     }
     const dayMap = new Map(days.map((d) => [d.key, d]));
 
@@ -221,15 +251,25 @@ export default function IbuBosPage() {
 
     const { data: salesData } = await supabase
       .from("sales")
-      .select("quantity, sold_at, products(full_name)")
+      .select("quantity, sold_at, products(id, full_name, photo_url)")
       .gte("sold_at", start.toISOString())
       .lt("sold_at", end.toISOString());
+
+    const { data: returnsData } = await supabase
+      .from("sales")
+      .select("quantity, status_changed_at")
+      .eq("status", "batal")
+      .gte("status_changed_at", start.toISOString())
+      .lt("status_changed_at", end.toISOString());
 
     const sevenDaysAgo = new Date(reference);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
-    const topMap = new Map<string, number>();
+    const topMap = new Map<
+      string,
+      { name: string; photo_url: string | null; qty: number }
+    >();
     let last7Total = 0;
 
     (salesData ?? []).forEach((s: any) => {
@@ -239,18 +279,30 @@ export default function IbuBosPage() {
 
       if (new Date(s.sold_at) >= sevenDaysAgo) last7Total += s.quantity;
 
+      const productId = s.products?.id ?? "unknown";
       const name = s.products?.full_name ?? "Produk";
-      topMap.set(name, (topMap.get(name) ?? 0) + s.quantity);
+      const photoUrl = s.products?.photo_url ?? null;
+      if (!topMap.has(productId)) {
+        topMap.set(productId, { name, photo_url: photoUrl, qty: 0 });
+      }
+      topMap.get(productId)!.qty += s.quantity;
+    });
+
+    (returnsData ?? []).forEach((r: any) => {
+      const key = (r.status_changed_at as string).split("T")[0];
+      const day = dayMap.get(key);
+      if (day) day.returned += r.quantity;
     });
 
     setSalesTrend(days);
     setSalesLast7(last7Total);
     setTopProducts(
       Array.from(topMap.entries())
-        .map(([name, qty]) => ({
-          name,
-          short: name.length > 26 ? name.slice(0, 24) + "…" : name,
-          qty,
+        .map(([id, p]) => ({
+          id,
+          name: p.name,
+          photo_url: p.photo_url,
+          qty: p.qty,
         }))
         .sort((a, b) => b.qty - a.qty)
         .slice(0, 5),
@@ -597,13 +649,29 @@ export default function IbuBosPage() {
                       />
                       <Tooltip
                         {...CHART_TOOLTIP_STYLE}
-                        itemStyle={{ color: "#39FF88" }}
-                        formatter={(value) => [`${value} pcs`, "Terjual"]}
+                        formatter={(value: any, name: any) => [
+                          `${value} pcs`,
+                          name === "qty" ? "Terjual" : "Retur",
+                        ]}
+                      />
+                      <Legend
+                        formatter={(value) =>
+                          value === "qty" ? "Terjual" : "Retur"
+                        }
+                        wrapperStyle={{ fontSize: 12 }}
                       />
                       <Line
                         type="monotone"
                         dataKey="qty"
                         stroke="#39FF88"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="returned"
+                        stroke="#FF5470"
                         strokeWidth={2}
                         dot={false}
                         activeDot={{ r: 4 }}
@@ -673,53 +741,65 @@ export default function IbuBosPage() {
                   Belum ada penjualan di periode ini
                 </p>
               ) : (
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={topProducts}
-                      layout="vertical"
-                      margin={{ left: 10 }}
-                    >
-                      <XAxis
-                        type="number"
-                        stroke="#8FA39A"
-                        fontSize={11}
-                        tickLine={false}
-                        axisLine={false}
-                        allowDecimals={false}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        stroke="#8FA39A"
-                        fontSize={11}
-                        tickLine={false}
-                        axisLine={false}
-                        width={isMobile ? 110 : 200}
-                        tick={{ fill: "#EAF2EE" }}
-                        tickFormatter={(value: string) => {
-                          const max = isMobile ? 14 : 26;
-                          return value.length > max
-                            ? value.slice(0, max - 2) + "…"
-                            : value;
-                        }}
-                      />
-                      <Tooltip
-                        {...CHART_TOOLTIP_STYLE}
-                        cursor={{ fill: "rgba(57,255,136,0.06)" }}
-                        formatter={(value) => [`${value} pcs`, "Terjual"]}
-                        labelFormatter={(_label, payload) =>
-                          payload?.[0]?.payload?.name ?? ""
-                        }
-                      />
-                      <Bar
-                        dataKey="qty"
-                        fill="#39FF88"
-                        radius={[0, 6, 6, 0]}
-                        barSize={16}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="space-y-3">
+                  {(() => {
+                    const maxQty = Math.max(
+                      ...topProducts.map((p) => p.qty),
+                      1,
+                    );
+                    return topProducts.map((p, i) => {
+                      const style = TOP_RANK_STYLE[i] ?? {
+                        ring: "ring-[#262E2A]",
+                        bar: "from-[#39FF88]/60 to-[#39FF88]/40",
+                        glow: "",
+                        badge: null,
+                        num: "text-[#8FA39A]",
+                      };
+                      return (
+                        <div key={p.id} className="flex items-center gap-3">
+                          <span
+                            className={`text-base font-extrabold w-5 text-right shrink-0 ${style.num}`}
+                          >
+                            {i + 1}
+                          </span>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <p className="text-xs text-[#EAF2EE] truncate">
+                                {p.name}
+                              </p>
+                              <span className="text-xs tabular-nums text-[#C7D6CE] shrink-0">
+                                {p.qty} pcs
+                              </span>
+                            </div>
+                            <div className="h-2.5 bg-black/30 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full bg-gradient-to-r ${style.bar} ${style.glow} rounded-full transition-all duration-700`}
+                                style={{ width: `${(p.qty / maxQty) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div
+                            className={`relative w-16 aspect-video rounded-lg bg-black/30 overflow-hidden shrink-0 ring-2 ${style.ring}`}
+                          >
+                            {p.photo_url && (
+                              <img
+                                src={p.photo_url}
+                                alt={p.name}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                            {style.badge && (
+                              <span className="absolute -top-1.5 -right-1.5 text-xs">
+                                {style.badge}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               )}
             </div>
