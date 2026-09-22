@@ -1963,41 +1963,40 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
 
   return (
     <div className="animate-fadeIn">
-      <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
-        <span className="w-2 h-2 rounded-full bg-accent-400"></span>
-        Kelola Stok
-      </h2>
+      <div className="sticky top-[65px] z-20 bg-base pb-4">
+        <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
+          <span className="w-2 h-2 rounded-full bg-accent-400"></span>
+          Kelola Stok
+        </h2>
 
-      <StatusBanner message={message} />
+        <StatusBanner message={message} />
 
-      {/* Tab switcher */}
-      <div className="flex gap-2 mb-5 border-b border-line">
-        <button
-          onClick={() => setTab("topi")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            tab === "topi"
-              ? "border-accent-400 text-accent-400"
-              : "border-transparent text-neutral-500 hover:text-neutral-300"
-          }`}
-        >
-          Stok Topi
-        </button>
-        <button
-          onClick={() => setTab("pelengkap")}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            tab === "pelengkap"
-              ? "border-accent-400 text-accent-400"
-              : "border-transparent text-neutral-500 hover:text-neutral-300"
-          }`}
-        >
-          Stok Pelengkap
-        </button>
-      </div>
+        {/* Tab switcher */}
+        <div className="flex gap-2 mb-5 border-b border-line">
+          <button
+            onClick={() => setTab("topi")}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              tab === "topi"
+                ? "border-accent-400 text-accent-400"
+                : "border-transparent text-neutral-500 hover:text-neutral-300"
+            }`}
+          >
+            Stok Topi
+          </button>
+          <button
+            onClick={() => setTab("pelengkap")}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              tab === "pelengkap"
+                ? "border-accent-400 text-accent-400"
+                : "border-transparent text-neutral-500 hover:text-neutral-300"
+            }`}
+          >
+            Stok Pelengkap
+          </button>
+        </div>
 
-      {/* ===== STOK TOPI ===== */}
-      {tab === "topi" && (
-        <div>
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        {tab === "topi" && (
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="relative flex-1 min-w-[240px]">
               <Search
                 size={16}
@@ -2019,98 +2018,101 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
               Total Produk
             </p>
           </div>
+        )}
+      </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
-            {filteredRows.map((row) => {
-              const status =
-                row.stock_qty <= 50
-                  ? { label: "Kritis", dot: "bg-red-500", text: "text-red-400" }
-                  : row.stock_qty <= 100
-                    ? {
-                        label: "Menipis",
-                        dot: "bg-amber-500",
-                        text: "text-amber-400",
-                      }
-                    : {
-                        label: "Aman",
-                        dot: "bg-emerald-500",
-                        text: "text-emerald-400",
-                      };
+      {/* ===== STOK TOPI ===== */}
+      {tab === "topi" && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
+          {filteredRows.map((row) => {
+            const status =
+              row.stock_qty <= 50
+                ? { label: "Kritis", dot: "bg-red-500", text: "text-red-400" }
+                : row.stock_qty <= 100
+                  ? {
+                      label: "Menipis",
+                      dot: "bg-amber-500",
+                      text: "text-amber-400",
+                    }
+                  : {
+                      label: "Aman",
+                      dot: "bg-emerald-500",
+                      text: "text-emerald-400",
+                    };
 
-              return (
-                <div
-                  key={row.id}
-                  className="bg-panel border border-line rounded-xl overflow-hidden hover:border-accent-500/30 transition-colors"
-                >
-                  {row.photo_url ? (
-                    <img
-                      src={row.photo_url}
-                      alt={row.full_name}
-                      className="w-full aspect-video object-cover"
+            return (
+              <div
+                key={row.id}
+                className="bg-panel border border-line rounded-xl overflow-hidden hover:border-accent-500/30 transition-colors"
+              >
+                {row.photo_url ? (
+                  <img
+                    src={row.photo_url}
+                    alt={row.full_name}
+                    className="w-full aspect-video object-cover"
+                  />
+                ) : (
+                  <div className="w-full aspect-video bg-black/30 flex items-center justify-center">
+                    <Package
+                      size={18}
+                      strokeWidth={1.5}
+                      className="text-neutral-600"
                     />
+                  </div>
+                )}
+
+                <div className="p-3">
+                  <p className="text-xs font-medium truncate mb-1.5">
+                    {row.full_name}
+                  </p>
+                  <div className="flex items-center gap-1.5 mb-2.5">
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${status.dot}`}
+                    ></span>
+                    <span className={`text-xs ${status.text}`}>
+                      {row.stock_qty} pcs — {status.label}
+                    </span>
+                  </div>
+
+                  {row.logo_type === "tempel" ? (
+                    <p className="text-[11px] text-amber-400/90 italic">
+                      Virtual · Terbatas:{" "}
+                      {row.limited_by === "polos" ? "Topi Polos" : "Pin"}
+                    </p>
                   ) : (
-                    <div className="w-full aspect-video bg-black/30 flex items-center justify-center">
-                      <Package
-                        size={18}
-                        strokeWidth={1.5}
-                        className="text-neutral-600"
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-14 bg-black/40 border border-line rounded-lg px-1.5 py-1.5 text-center text-xs focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
+                        value={qtyInputs[row.id] || ""}
+                        onChange={(e) =>
+                          setQtyInputs((prev) => ({
+                            ...prev,
+                            [row.id]: Number(e.target.value),
+                          }))
+                        }
                       />
+                      <button
+                        onClick={() => handleAddStock(row)}
+                        title="Tambah stok"
+                        className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
+                      >
+                        <Plus size={14} strokeWidth={2} />
+                      </button>
+                      <button
+                        onClick={() => handleReduceStock(row)}
+                        title="Kurangi stok"
+                        className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors"
+                      >
+                        <Minus size={14} strokeWidth={2} />
+                      </button>
                     </div>
                   )}
-
-                  <div className="p-3">
-                    <p className="text-xs font-medium truncate mb-1.5">
-                      {row.full_name}
-                    </p>
-                    <div className="flex items-center gap-1.5 mb-2.5">
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full ${status.dot}`}
-                      ></span>
-                      <span className={`text-xs ${status.text}`}>
-                        {row.stock_qty} pcs — {status.label}
-                      </span>
-                    </div>
-
-                    {row.logo_type === "tempel" ? (
-                      <p className="text-[11px] text-amber-400/90 italic">
-                        Virtual · Terbatas:{" "}
-                        {row.limited_by === "polos" ? "Topi Polos" : "Pin"}
-                      </p>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          placeholder="0"
-                          className="w-14 bg-black/40 border border-line rounded-lg px-1.5 py-1.5 text-center text-xs focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50"
-                          value={qtyInputs[row.id] || ""}
-                          onChange={(e) =>
-                            setQtyInputs((prev) => ({
-                              ...prev,
-                              [row.id]: Number(e.target.value),
-                            }))
-                          }
-                        />
-                        <button
-                          onClick={() => handleAddStock(row)}
-                          title="Tambah stok"
-                          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors"
-                        >
-                          <Plus size={14} strokeWidth={2} />
-                        </button>
-                        <button
-                          onClick={() => handleReduceStock(row)}
-                          title="Kurangi stok"
-                          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors"
-                        >
-                          <Minus size={14} strokeWidth={2} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
