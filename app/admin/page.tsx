@@ -3588,7 +3588,7 @@ export default function AdminPage() {
 
         {/* Sidebar Navigasi: drawer di mobile, statis di desktop */}
         <div
-          className={`fixed md:static top-0 left-0 h-full md:h-auto w-64 md:w-60 bg-panel md:bg-panel/50 border-r border-line md:min-h-[calc(100vh-65px)] p-4 z-50 transform transition-transform duration-300 ease-out ${
+          className={`fixed md:sticky top-0 md:top-[65px] left-0 h-full md:h-[calc(100vh-65px)] w-64 md:w-60 bg-panel md:bg-panel/50 border-r border-line p-4 z-50 overflow-y-auto transform transition-transform duration-300 ease-out ${
             mobileNavOpen ? "translate-x-0" : "-translate-x-full"
           } md:translate-x-0`}
         >
