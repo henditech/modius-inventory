@@ -20,6 +20,8 @@ const ROUTES: Record<
   gita: { path: "/admin", asUser: "Gita", displayName: "Gita" },
   scanner: { path: "/scan", displayName: "Scanner" },
   scan: { path: "/scan", displayName: "Scanner" },
+  stok: { path: "/stok-live", displayName: "Stok Live" },
+  host: { path: "/stok-live", displayName: "Stok Live" },
 };
 
 const GREETING_LINES = [
