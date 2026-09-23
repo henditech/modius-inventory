@@ -12,14 +12,18 @@ type Product = {
 
 function getStockStatus(qty: number) {
   if (qty <= 50)
-    return { label: "Stok Kritis!", color: "bg-red-500", text: "text-red-600" };
+    return { label: "Stok Kritis!", color: "bg-red-500", text: "text-red-400" };
   if (qty <= 100)
     return {
       label: "Stok Menipis",
-      color: "bg-yellow-500",
-      text: "text-yellow-600",
+      color: "bg-amber-500",
+      text: "text-amber-400",
     };
-  return { label: "Stok Aman", color: "bg-green-500", text: "text-green-600" };
+  return {
+    label: "Stok Aman",
+    color: "bg-emerald-500",
+    text: "text-emerald-400",
+  };
 }
 
 export default function ProduksiPage() {
@@ -53,8 +57,7 @@ export default function ProduksiPage() {
           };
         });
 
-        // ✅ URUTKAN DARI STOK PALING SEDIKIT → PALING BANYAK
-        mapped.sort((a, b) => a.stock_qty - b.stock_qty);
+        mapped.sort((a, b) => b.stock_qty - a.stock_qty);
 
         setProducts(mapped);
       }
@@ -92,74 +95,77 @@ export default function ProduksiPage() {
   }
 
   return (
-    <div className="p-6 max-w-md mx-auto">
-      <h1 className="text-2xl font-bold mb-6 text-center">
-        Catat Produksi Topi
-      </h1>
+    <div className="min-h-screen bg-[#0a0b0e] text-neutral-100 p-4">
+      <div className="max-w-md mx-auto">
+        <h1 className="text-2xl font-bold mb-6 text-center text-neutral-50">
+          Catat Produksi Topi
+        </h1>
 
-      {message && (
-        <div className="mb-4 text-center text-lg font-semibold text-green-600">
-          {message}
-        </div>
-      )}
+        {message && (
+          <div className="mb-4 text-center text-sm font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2.5">
+            {message}
+          </div>
+        )}
 
-      <div className="space-y-6">
-        {products.map((product) => {
-          const status = getStockStatus(product.stock_qty);
-          return (
-            <div key={product.id} className="border rounded-2xl p-4 shadow-sm">
-              <div className="relative">
-                {product.photo_url && (
-                  <img
-                    src={product.photo_url}
-                    alt={product.full_name}
-                    className="w-full h-48 object-cover rounded-xl mb-3"
-                  />
-                )}
-                <div
-                  className={`absolute top-2 right-2 ${status.color} text-white text-sm font-bold px-3 py-1 rounded-full`}
-                >
-                  {status.label}
-                </div>
-              </div>
-
-              <p className="text-center font-medium mb-1">
-                {product.full_name}
-              </p>
-              <p className={`text-center text-sm mb-3 ${status.text}`}>
-                Sisa stok: {product.stock_qty} pcs
-              </p>
-
-              <div className="flex items-center justify-center gap-4 mb-3">
-                <button
-                  onClick={() => updateQty(product.id, -10)}
-                  className="w-14 h-14 text-2xl rounded-full bg-gray-200 active:bg-gray-300"
-                >
-                  −
-                </button>
-                <span className="text-3xl font-bold w-16 text-center">
-                  {quantities[product.id] || 0}
-                </span>
-                <button
-                  onClick={() => updateQty(product.id, 10)}
-                  className="w-14 h-14 text-2xl rounded-full bg-gray-200 active:bg-gray-300"
-                >
-                  +
-                </button>
-              </div>
-
-              <button
-                onClick={() => handleSave(product.id)}
-                disabled={
-                  savingId === product.id || (quantities[product.id] || 0) <= 0
-                }
-                className="w-full py-4 text-xl font-bold rounded-xl bg-green-600 text-white active:bg-green-700 disabled:bg-gray-300"
+        <div className="space-y-5">
+          {products.map((product) => {
+            const status = getStockStatus(product.stock_qty);
+            return (
+              <div
+                key={product.id}
+                className="bg-[#111318] border border-[#23262e] rounded-2xl p-4"
               >
-                {savingId === product.id ? "Menyimpan..." : "Simpan"}
-              </button>
-            </div>
-          );
-        })}
+                <div className="rounded-xl overflow-hidden mb-3">
+                  {product.photo_url ? (
+                    <img
+                      src={product.photo_url}
+                      alt={product.full_name}
+                      className="w-full h-48 object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-48 bg-black/30" />
+                  )}
+                </div>
+
+                <p className="text-center font-medium mb-1 text-neutral-100">
+                  {product.full_name}
+                </p>
+                <p className={`text-center text-sm mb-3 ${status.text}`}>
+                  Sisa stok: {product.stock_qty} pcs
+                </p>
+
+                <div className="flex items-center justify-center gap-4 mb-3">
+                  <button
+                    onClick={() => updateQty(product.id, -10)}
+                    className="w-14 h-14 flex items-center justify-center text-2xl font-semibold rounded-full bg-white/10 border border-white/15 text-white active:bg-white/20 transition-colors"
+                  >
+                    −
+                  </button>
+                  <span className="text-3xl font-bold w-16 text-center text-neutral-50 tabular-nums">
+                    {quantities[product.id] || 0}
+                  </span>
+                  <button
+                    onClick={() => updateQty(product.id, 10)}
+                    className="w-14 h-14 flex items-center justify-center text-2xl font-semibold rounded-full bg-white/10 border border-white/15 text-white active:bg-white/20 transition-colors"
+                  >
+                    +
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => handleSave(product.id)}
+                  disabled={
+                    savingId === product.id ||
+                    (quantities[product.id] || 0) <= 0
+                  }
+                  className="w-full py-4 text-lg font-bold rounded-xl bg-emerald-500 text-black active:bg-emerald-400 disabled:bg-white/10 disabled:text-neutral-600 transition-colors"
+                >
+                  {savingId === product.id ? "Menyimpan..." : "Simpan"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
