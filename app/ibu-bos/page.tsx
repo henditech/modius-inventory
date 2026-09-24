@@ -52,9 +52,9 @@ const NAV: { id: Section; label: string; icon: LucideIcon }[] = [
 ];
 
 function getStockStatus(qty: number) {
-  if (qty <= 60)
+  if (qty <= 50)
     return { label: "Kritis", dot: "bg-[#FF5470]", text: "text-[#FF5470]" };
-  if (qty <= 120)
+  if (qty <= 100)
     return { label: "Menipis", dot: "bg-[#FFB020]", text: "text-[#FFB020]" };
   return { label: "Aman", dot: "bg-[#39FF88]", text: "text-[#39FF88]" };
 }
@@ -62,9 +62,9 @@ function getStockStatus(qty: number) {
 // Bahan pelengkap & pin biasanya dibeli dalam jumlah lebih kecil dari stok topi,
 // jadi pakai ambang batas sendiri. Sesuaikan angka ini kalau ternyata belum pas.
 function getSupplyStatus(qty: number) {
-  if (qty <= 5)
+  if (qty <= 50)
     return { label: "Kritis", dot: "bg-[#FF5470]", text: "text-[#FF5470]" };
-  if (qty <= 15)
+  if (qty <= 100)
     return { label: "Menipis", dot: "bg-[#FFB020]", text: "text-[#FFB020]" };
   return { label: "Aman", dot: "bg-[#39FF88]", text: "text-[#39FF88]" };
 }
@@ -215,7 +215,7 @@ export default function IbuBosPage() {
       .from("product_available_stock")
       .select("product_id, full_name, photo_url, available_qty")
       .eq("is_active", true)
-      .order("available_qty", { ascending: true });
+      .order("available_qty", { ascending: false });
     if (productData) {
       setProducts(
         productData.map((p: any) => ({

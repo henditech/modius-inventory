@@ -1815,7 +1815,7 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
       };
     });
 
-    final.sort((a, b) => a.stock_qty - b.stock_qty);
+    final.sort((a, b) => b.stock_qty - a.stock_qty);
     setRows(final);
   }
 
