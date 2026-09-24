@@ -349,14 +349,24 @@ type StoreOption = {
   managed_by: string;
 };
 
+// Tanggal "hari ini" menurut WIB, bukan UTC -- supaya jam 00.00-07.00 pagi
+// tidak masih terbaca sebagai kemarin.
 function todayStr() {
-  return new Date().toISOString().split("T")[0];
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
 }
 
+// Geser tanggal (format YYYY-MM-DD) murni hitungan kalender, tidak
+// terpengaruh zona waktu browser.
 function shiftDateStr(dateStr: string, deltaDays: number) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setDate(d.getDate() + deltaDays);
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + deltaDays);
   return d.toISOString().split("T")[0];
+}
+
+// Awal hari (00.00 WIB) dari tanggal YYYY-MM-DD, dalam format ISO/UTC
+// yang dipakai untuk membandingkan kolom timestamp di Supabase.
+function wibStartISO(dateStr: string) {
+  return new Date(`${dateStr}T00:00:00+07:00`).toISOString();
 }
 
 function shortLabel(isoStr: string) {
@@ -445,6 +455,12 @@ function StoreSelect({
   );
 }
 
+// Jumlah baris per "halaman" di Catatan Penjualan. MAX mengikuti batas
+// bawaan Supabase (1000 baris per request) -- lebih dari itu akan dipotong
+// diam-diam oleh server, jadi kita berhenti di angka ini dan beri peringatan.
+const SALES_PAGE_SIZE = 200;
+const SALES_MAX_ROWS = 1000;
+
 function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   const [stores, setStores] = useState<StoreOption[]>([]);
   const [search, setSearch] = useState("");
@@ -452,7 +468,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   const [dateTo, setDateTo] = useState(todayStr());
   const [storeFilter, setStoreFilter] = useState("");
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
-  const [limit, setLimit] = useState(50);
+  const [limit, setLimit] = useState(SALES_PAGE_SIZE);
+  const [totalRows, setTotalRows] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [copiedResi, setCopiedResi] = useState<string | null>(null);
 
@@ -465,28 +484,48 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   }
 
   async function loadSalesHistory() {
+    if (!dateFrom || !dateTo) return;
+    const myRequest = ++requestIdRef.current;
     setLoading(true);
-    const start = `${dateFrom}T00:00:00`;
-    const endDate = new Date(dateTo);
-    endDate.setDate(endDate.getDate() + 1);
-    const end = `${endDate.toISOString().split("T")[0]}T00:00:00`;
+    setErrorMsg(null);
 
-    const { data } = await supabase
+    // Batas hari dihitung dalam WIB (UTC+7), bukan UTC.
+    const start = wibStartISO(dateFrom);
+    const end = wibStartISO(shiftDateStr(dateTo, 1));
+
+    // Filter admin & toko dilakukan di database (stores!inner), sebelum
+    // limit -- jadi limit hanya menghitung baris milik toko yang dilihat,
+    // bukan berebut jatah dengan toko admin lain.
+    let query = supabase
       .from("sales")
       .select(
-        "quantity, sold_at, sold_by, resi_number, products(full_name, photo_url), stores(code, name, managed_by)",
+        "quantity, sold_at, sold_by, resi_number, products(full_name, photo_url), stores!inner(code, name, managed_by)",
+        { count: "exact" },
       )
+      .eq("stores.managed_by", currentUser)
       .gte("sold_at", start)
       .lt("sold_at", end)
       .order("sold_at", { ascending: false })
       .limit(limit);
 
-    // Tiap admin cuma lihat penjualan dari toko yang dia kelola sendiri --
-    // sama persis polanya kayak Overview & versi lama halaman ini.
-    const scoped = (data ?? []).filter(
-      (s: any) => s.stores?.managed_by === currentUser,
-    );
-    setSalesHistory(scoped);
+    if (storeFilter) query = query.eq("stores.code", storeFilter);
+
+    const { data, count, error } = await query;
+
+    // Abaikan hasil kalau sudah ada permintaan yang lebih baru
+    // (misalnya ganti tanggal cepat-cepat).
+    if (myRequest !== requestIdRef.current) return;
+
+    if (error) {
+      setErrorMsg(error.message);
+      setSalesHistory([]);
+      setTotalRows(0);
+      setLoading(false);
+      return;
+    }
+
+    setSalesHistory(data ?? []);
+    setTotalRows(count ?? data?.length ?? 0);
     setLoading(false);
   }
 
@@ -496,7 +535,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
 
   useEffect(() => {
     loadSalesHistory();
-  }, [dateFrom, dateTo, limit, currentUser]);
+  }, [dateFrom, dateTo, storeFilter, limit, currentUser]);
 
   function copyResi(resi: string) {
     navigator.clipboard.writeText(resi);
@@ -517,6 +556,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   });
 
   const totalQty = filteredHistory.reduce((sum, s) => sum + s.quantity, 0);
+
+  // Data di database bisa lebih banyak dari yang sudah dimuat.
+  const isIncomplete = totalRows > salesHistory.length;
+  const canLoadMore = isIncomplete && limit < SALES_MAX_ROWS;
 
   // Satu resi bisa punya beberapa produk berbeda -- digabung jadi satu
   // kartu berdasarkan resi_number, sama pola-nya kayak Catatan Retur.
@@ -574,7 +617,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
             type="date"
             value={dateFrom}
             max={dateTo}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setLimit(SALES_PAGE_SIZE);
+            }}
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70"
           />
         </div>
@@ -587,7 +633,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
             value={dateTo}
             min={dateFrom}
             max={todayStr()}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setLimit(SALES_PAGE_SIZE);
+            }}
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70"
           />
         </div>
@@ -598,7 +647,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
           </label>
           <select
             value={storeFilter}
-            onChange={(e) => setStoreFilter(e.target.value)}
+            onChange={(e) => {
+              setStoreFilter(e.target.value);
+              setLimit(SALES_PAGE_SIZE);
+            }}
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
           >
             <option value="">Semua Toko Saya</option>
@@ -617,6 +669,22 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
             {totalQty} pcs
           </span>{" "}
           dari {grouped.length} resi
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-red-300">
+          Data gagal dimuat: {errorMsg}
+        </div>
+      )}
+
+      {!loading && !errorMsg && isIncomplete && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-amber-200">
+          Baru menampilkan {salesHistory.length} dari {totalRows} item di
+          rentang ini, jadi angka di atas belum lengkap.
+          {search && " Pencarian hanya mencakup item yang sudah dimuat."}
+          {!canLoadMore &&
+            " Datanya melebihi batas tampilan — persempit rentang tanggal atau pilih satu toko untuk melihat sisanya."}
         </div>
       )}
 
@@ -662,6 +730,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
                     <img
                       src={it.photo}
                       alt={it.product}
+                      loading="lazy"
                       className="w-24 aspect-video rounded-lg object-cover shrink-0"
                     />
                   ) : (
@@ -701,9 +770,11 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
         )}
       </div>
 
-      {!loading && salesHistory.length === limit && (
+      {!loading && canLoadMore && (
         <button
-          onClick={() => setLimit((l) => l + 50)}
+          onClick={() =>
+            setLimit((l) => Math.min(l + SALES_PAGE_SIZE, SALES_MAX_ROWS))
+          }
           className="w-full mt-4 py-2.5 rounded-lg border border-line text-sm text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 transition-colors"
         >
           Muat lebih banyak
