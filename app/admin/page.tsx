@@ -2098,29 +2098,45 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
           {filteredRows.map((row) => {
             const status =
               row.stock_qty <= 50
-                ? { label: "Kritis", dot: "bg-red-500", text: "text-red-400" }
+                ? {
+                    label: "Kritis",
+                    dot: "bg-red-500",
+                    text: "text-red-400",
+                    border: "hover:border-red-500/40",
+                    glow: "hover:shadow-[0_10px_28px_-10px_rgba(248,113,113,0.35)]",
+                    numGlow:
+                      "group-hover:text-red-300 group-hover:drop-shadow-[0_0_10px_rgba(248,113,113,0.6)]",
+                  }
                 : row.stock_qty <= 100
                   ? {
                       label: "Menipis",
                       dot: "bg-amber-500",
                       text: "text-amber-400",
+                      border: "hover:border-amber-500/40",
+                      glow: "hover:shadow-[0_10px_28px_-10px_rgba(251,191,36,0.35)]",
+                      numGlow:
+                        "group-hover:text-amber-300 group-hover:drop-shadow-[0_0_10px_rgba(251,191,36,0.6)]",
                     }
                   : {
                       label: "Aman",
                       dot: "bg-emerald-500",
                       text: "text-emerald-400",
+                      border: "hover:border-emerald-500/40",
+                      glow: "hover:shadow-[0_10px_28px_-10px_rgba(52,211,153,0.35)]",
+                      numGlow:
+                        "group-hover:text-emerald-300 group-hover:drop-shadow-[0_0_10px_rgba(52,211,153,0.6)]",
                     };
 
             return (
               <div
                 key={row.id}
-                className="bg-panel border border-line rounded-xl overflow-hidden hover:border-accent-500/30 transition-colors"
+                className={`group bg-panel border border-line rounded-xl overflow-hidden transition-all duration-300 hover:-translate-y-1 ${status.border} ${status.glow}`}
               >
                 {row.photo_url ? (
                   <img
                     src={row.photo_url}
                     alt={row.full_name}
-                    className="w-full aspect-video object-cover"
+                    className="w-full aspect-video object-cover transition-transform duration-300 group-hover:scale-105"
                   />
                 ) : (
                   <div className="w-full aspect-video bg-black/30 flex items-center justify-center">
@@ -2140,7 +2156,9 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${status.dot}`}
                     ></span>
-                    <span className={`text-xs ${status.text}`}>
+                    <span
+                      className={`text-xs font-medium transition-all duration-300 ${status.text} ${status.numGlow}`}
+                    >
                       {row.stock_qty} pcs — {status.label}
                     </span>
                   </div>
