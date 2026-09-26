@@ -102,6 +102,17 @@ export default function ObrolanSection({
     setLoading(false);
   }
 
+  async function askGemini(userInput: string) {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: userInput }),
+    });
+
+    const data = await res.json();
+    console.log("Jawaban Gemini:", data.text);
+  }
+
   // Kirim Pesan (Logic terpisah berdasarkan activeTab)
   async function handleSend() {
     const body = text.trim();
