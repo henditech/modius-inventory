@@ -685,7 +685,7 @@ export default function HomePage() {
               setSetupHint(e.target.value);
               setSetupError("");
             }}
-            placeholder="Kata rahasia buat lupa password (misal: nama kucing)"
+            placeholder="Kata rahasia buat lupa password (misal: nama kesayangan)"
             className="w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-sm mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
           />
           {setupError && (
