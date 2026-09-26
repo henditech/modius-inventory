@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/genai": "^2.24.0",
     "@supabase/supabase-js": "^2.117.2",
     "bcryptjs": "^3.0.3",
     "html5-qrcode": "^2.3.8",
