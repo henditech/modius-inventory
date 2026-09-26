@@ -7,104 +7,113 @@ import {
   updateModiMemory,
 } from "@/lib/supabase-admin";
 
-// Inisialisasi Google Gen AI SDK
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-export async function POST(request: Request) {
+const SYSTEM_INSTRUCTION_BASE = `
+Kamu adalah Modi, asisten AI cerdas, ramah, dan santai untuk sistem Modius. Pengguna sistem ini HANYA ada dua orang, yaitu Kak Hendi dan Kak Gita.
+Aturan Panggilan & Bahasa:
+1. Panggil pengguna HANYA dengan sebutan "Kak Hendi" atau "Kak Gita". Saat ini kamu sedang berbicara dengan: {{USER_NAME}}.
+2. Gunakan gaya bahasa santai, hangat, dan akrab layaknya rekan kerja dekat yang suportif, namun TETAP sopan.
+3. JANGAN PERNAH menggunakan kata gaul Jakarta seperti "lo", "gue", "lu", atau sejenisnya karena tidak sesuai dengan budaya kerja mereka.
+Konteks Utama:
+Kak Hendi dan Kak Gita adalah admin toko online yang mengelola marketplace Shopee, Tokopedia, dan TikTok Shop.
+Tugas dan Kepribadian Kamu:
+1. Analisis Bisnis E-Commerce: Membantu memberikan analisis strategi toko, perhitungan kesehatan iklan (CTR, Conversion Rate, CPA/ROAS), serta performa stok secara tajam dan solutif.
+2. Mode Teman Obrol: Jika mereka sedang gabut, jadilah teman mengobrol yang asyik, peka, dan menghibur tanpa kehilangan sisi profesional sebagai asisten.
+3. Format Output: Jika diminta membuat laporan atau analisis, sajikan dengan format markdown yang rapi.
+Catatan Memori Kamu:
+"{{LONG_TERM_MEMORY}}"
+Evolusi Persona:
+Selalulah mengamati, beradaptasi, dan belajar dari percakapan. Di akhir jawaban, jika ada hal penting baru, tuliskan di tag <UPDATE_MEMORY>isi rangkuman</UPDATE_MEMORY>.
+`;
+
+export async function POST(req: Request) {
   try {
-    const { message, userName } = await request.json();
+    const body = await req.json();
+    const prompt = body.prompt || body.message || body.text || "";
+    const userName = body.userName || body.username || body.name || "Hendi";
 
-    // Validasi input nama pengguna (Default ke Kak Hendi/Gita jika kosong)
-    const validUserName = userName === "Gita" ? "Kak Gita" : "Kak Hendi";
+    // Validasi nama pengguna
+    const validUserName = userName.toLowerCase().includes("gita")
+      ? "Kak Gita"
+      : "Kak Hendi";
 
-    if (!message) {
+    // Validasi pesan kosong
+    if (!prompt || prompt.trim() === "") {
       return NextResponse.json(
-        { error: "Pesan tidak boleh kosong" },
+        { reply: "Pesan tidak boleh kosong" },
         { status: 400 },
       );
     }
 
-    // 1. Ambil memori jangka panjang & riwayat chat jangka pendek dari Supabase
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("GEMINI_API_KEY belum terpasang di .env.local!");
+      return NextResponse.json(
+        { reply: "Error: API Key belum dipasang di .env.local" },
+        { status: 500 },
+      );
+    }
+
+    // === Ambil riwayat & memori dari Supabase ===
     const longTermMemory = await getModiMemory();
     const shortTermHistory = await getChatHistory();
 
-    // 2. Susun System Instruction terbaru + masukkan memori jangka panjang di dalamnya
-    const systemInstruction = `
-Kamu adalah Modi, asisten AI cerdas, ramah, dan santai untuk sistem Modius. Pengguna sistem ini HANYA ada dua orang, yaitu Kak Hendi dan Kak Gita.
+    // Susun instruksi lengkap
+    const systemInstruction = SYSTEM_INSTRUCTION_BASE.replace(
+      "{{USER_NAME}}",
+      validUserName,
+    ).replace(
+      "{{LONG_TERM_MEMORY}}",
+      longTermMemory || "Belum ada catatan khusus.",
+    );
 
-Aturan Panggilan & Bahasa:
-1. Panggil pengguna HANYA dengan sebutan "Kak Hendi" atau "Kak Gita". Saat ini kamu sedang berbicara dengan: ${validUserName}.
-2. Gunakan gaya bahasa santai, hangat, dan akrab layaknya rekan kerja dekat yang suportif, namun TETAP sopan.
-3. JANGAN PERNAH menggunakan kata gaul Jakarta seperti "lo", "gue", "lu", atau sejenisnya karena tidak sesuai dengan budaya kerja mereka.
-
-Konteks Utama:
-Kak Hendi dan Kak Gita adalah admin toko online yang mengelola marketplace Shopee, Tokopedia, dan TikTok Shop.
-
-Tugas dan Kepribadian Kamu:
-1. Analisis Bisnis E-Commerce: Membantu memberikan analisis strategi toko, perhitungan kesehatan iklan (CTR, Conversion Rate, CPA/ROAS), serta performa stok secara tajam dan solutif.
-2. Mode Teman Obrol: Jika mereka sedang gabut, jadilah teman mengobrol yang asyik, peka, dan menghibur tanpa kehilangan sisi profesional sebagai asisten.
-3. Format Output: Jika diminta membuat laporan atau analisis, sajikan dengan format markdown yang rapi (gunakan bolding atau tabel jika diperlukan).
-
-Catatan Memori Kamu Tentang Mereka (Hasil Belajar Sebelumnya):
-"${longTermMemory}"
-
-Evolusi Persona (Pembelajaran Dinamis):
-Selalulah mengamati, beradaptasi, dan belajar dari gaya bahasa, masukan, kritik, serta preferensi yang disampaikan oleh Kak Hendi dan Kak Gita selama percakapan berlangsung. Di akhir jawabanmu, jika ada hal penting baru mengenai preferensi atau kebiasaan mereka yang perlu kamu ingat di masa depan, tuliskan rangkumannya secara singkat di dalam tag khusus <UPDATE_MEMORY>isi rangkuman di sini</UPDATE_MEMORY>.
-`;
-
-    // 3. Format riwayat chat dari database agar sesuai dengan struktur Gemini API
-    // Kita petakan format database ('user'/'model') ke format Gemini ('user'/'model')
-    const formattedContents = shortTermHistory.map((chat) => ({
+    // Format riwayat chat + pesan terbaru
+    const contents = shortTermHistory.map((chat) => ({
       role: chat.role,
       parts: [{ text: chat.content }],
     }));
-
-    // Tambahkan pesan terbaru dari user ke dalam antrean chat
-    formattedContents.push({
+    contents.push({
       role: "user",
-      parts: [{ text: message }],
+      parts: [{ text: prompt }],
     });
 
-    // 4. Simpan chat dari user ke database Supabase secara real-time
-    await saveChat(validUserName, "user", message);
+    // Simpan pesan user ke database
+    await saveChat(validUserName, "user", prompt);
 
-    // 5. Panggil API Gemini 3.6 Flash menggunakan standar struktur SDK @google/genai terbaru
+    // Panggil API — pakai model yang SUDAH JALAN di sistem kamu
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash", // Menggunakan model terbaru yang stabil, cepat, dan hemat token
-      contents: formattedContents,
+      model: "gemini-3.6-flash", // ✅ Tetap pakai ini, sudah terbukti berfungsi!
+      contents: contents,
       config: {
-        systemInstruction: systemInstruction, // Langsung masukkan string teks prompt Modi di sini
+        systemInstruction: systemInstruction,
+        temperature: 0.7,
       },
     });
 
     let aiReply =
       response.text || "Maaf Kak, Modi agak linglung. Bisa diulang?";
 
-    // 6. Cek apakah Modi ingin memperbarui memori jangka panjangnya
+    // Cek & simpan memori baru
     const memoryMatch = aiReply.match(
       /<UPDATE_MEMORY>([\s\S]*?)<\/UPDATE_MEMORY>/,
     );
     if (memoryMatch && memoryMatch[1]) {
-      const newMemoryNotes = memoryMatch[1].trim();
-      // Gabungkan memori lama dengan temuan baru agar memorinya makin kaya
-      const updatedNotes = `${longTermMemory}\n- ${newMemoryNotes}`.trim();
+      const newNotes = memoryMatch[1].trim();
+      const updatedNotes = `${longTermMemory}\n- ${newNotes}`.trim();
       await updateModiMemory(updatedNotes);
-
-      // Bersihkan tag memori dari teks balasan agar tidak ikut terbaca oleh Kak Hendi / Kak Gita
       aiReply = aiReply
-        .replace(/<UPDATE_MEMORY>([\s\S]*?)<\/UPDATE_MEMORY>/g, "")
+        .replace(/<UPDATE_MEMORY>[\s\S]*?<\/UPDATE_MEMORY>/g, "")
         .trim();
     }
 
-    // 7. Simpan balasan Modi ke database Supabase
+    // Simpan jawaban AI ke database
     await saveChat(validUserName, "model", aiReply);
 
-    // 8. Kirim balasan ke tampilan chat toko online Anda
     return NextResponse.json({ reply: aiReply });
   } catch (error: any) {
-    console.error("Error pada Modi Chat API:", error);
+    console.error("Gemini API Error Detail:", error);
     return NextResponse.json(
-      { error: "Terjadi kesalahan pada server." },
+      { reply: `Gagal terhubung: ${error.message || "Unknown error"}` },
       { status: 500 },
     );
   }
