@@ -10,14 +10,29 @@ const AVATARS: Record<string, string> = {
 
 const ROUTES: Record<
   string,
-  { path: string; asUser?: "Hendi" | "Gita"; displayName: string }
+  {
+    path: string;
+    asUser?: "Hendi" | "Gita";
+    displayName: string;
+    requiresPassword?: boolean;
+  }
 > = {
   "pak wawan": { path: "/produksi", displayName: "Pak Wawan" },
   wawan: { path: "/produksi", displayName: "Pak Wawan" },
   "ibu bos": { path: "/ibu-bos", displayName: "Ibu Bos" },
   "bu bos": { path: "/ibu-bos", displayName: "Ibu Bos" },
-  hendi: { path: "/admin", asUser: "Hendi", displayName: "Hendi" },
-  gita: { path: "/admin", asUser: "Gita", displayName: "Gita" },
+  hendi: {
+    path: "/admin",
+    asUser: "Hendi",
+    displayName: "Hendi",
+    requiresPassword: true,
+  },
+  gita: {
+    path: "/admin",
+    asUser: "Gita",
+    displayName: "Gita",
+    requiresPassword: true,
+  },
   scanner: { path: "/scan", displayName: "Scanner" },
   scan: { path: "/scan", displayName: "Scanner" },
   stok: { path: "/stok-live", displayName: "Stok Live" },
@@ -38,6 +53,13 @@ type Greeting = {
   path: string;
 };
 
+type PendingMatch = {
+  key: string;
+  match: (typeof ROUTES)[string];
+};
+
+type Step = "name" | "checking" | "setup" | "password";
+
 // Berapa lama greeting tampil normal sebelum efek portal mulai
 const HOLD_MS = 700;
 // Durasi animasi portal (blur + zoom-out + flash)
@@ -54,11 +76,27 @@ export default function HomePage() {
   const [showIOSHint, setShowIOSHint] = useState(false);
   const router = useRouter();
 
+  const [step, setStep] = useState<Step>("name");
+  const [pendingMatch, setPendingMatch] = useState<PendingMatch | null>(null);
+
+  // --- login (password sudah ada) ---
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const [hintLoading, setHintLoading] = useState(false);
+
+  // --- setup (password belum ada) ---
+  const [setupPassword, setSetupPassword] = useState("");
+  const [setupHint, setSetupHint] = useState("");
+  const [setupError, setSetupError] = useState("");
+  const [setupLoading, setSetupLoading] = useState(false);
+
   useEffect(() => {
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       (window.navigator as any).standalone === true;
-    if (standalone) return; // udah keinstall, gak perlu tombol lagi
+    if (standalone) return;
 
     const iOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
     setIsIOS(iOS);
@@ -97,7 +135,6 @@ export default function HomePage() {
     setShowInstallBtn(false);
   }
 
-  // Begitu greeting tampil: tunggu sebentar, mulai efek portal, lalu pindah halaman
   useEffect(() => {
     if (!greeting) return;
     const zoomTimer = setTimeout(() => setPortalLeaving(true), HOLD_MS);
@@ -111,7 +148,13 @@ export default function HomePage() {
     };
   }, [greeting, router]);
 
-  function handleSubmit(e: React.FormEvent) {
+  function startGreeting(displayName: string, path: string) {
+    const line =
+      GREETING_LINES[Math.floor(Math.random() * GREETING_LINES.length)];
+    setGreeting({ displayName, line, path });
+  }
+
+  async function handleNameSubmit(e: React.FormEvent) {
     e.preventDefault();
     const key = name.trim().toLowerCase();
     const match = ROUTES[key];
@@ -121,13 +164,123 @@ export default function HomePage() {
       return;
     }
 
-    if (match.asUser) {
-      sessionStorage.setItem("modiusUser", match.asUser);
+    if (!match.requiresPassword) {
+      if (match.asUser) {
+        sessionStorage.setItem("modiusUser", match.asUser);
+      }
+      startGreeting(match.displayName, match.path);
+      return;
     }
 
-    const line =
-      GREETING_LINES[Math.floor(Math.random() * GREETING_LINES.length)];
-    setGreeting({ displayName: match.displayName, line, path: match.path });
+    setPendingMatch({ key, match });
+    setError("");
+    setStep("checking");
+
+    try {
+      const res = await fetch(
+        `/api/login/status?name=${encodeURIComponent(key)}`,
+      );
+      const data = await res.json();
+      setStep(data.hasPassword ? "password" : "setup");
+    } catch {
+      setError("Gagal menghubungi server, coba lagi");
+      setStep("name");
+    }
+  }
+
+  async function handleSetupSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pendingMatch) return;
+    setSetupError("");
+
+    if (setupPassword.length < 4) {
+      setSetupError("Password minimal 4 karakter");
+      return;
+    }
+    if (setupHint.trim().length < 2) {
+      setSetupError("Isi kata rahasia buat jaga-jaga lupa password");
+      return;
+    }
+
+    setSetupLoading(true);
+    try {
+      const res = await fetch("/api/login/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: pendingMatch.key,
+          password: setupPassword,
+          hint: setupHint,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setSetupError(data.error || "Gagal menyimpan, coba lagi");
+        setSetupLoading(false);
+        return;
+      }
+      if (pendingMatch.match.asUser) {
+        sessionStorage.setItem("modiusUser", pendingMatch.match.asUser);
+      }
+      startGreeting(pendingMatch.match.displayName, pendingMatch.match.path);
+    } catch {
+      setSetupError("Gagal menghubungi server, coba lagi");
+      setSetupLoading(false);
+    }
+  }
+
+  async function handlePasswordSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pendingMatch) return;
+    setPasswordError("");
+    setPasswordLoading(true);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: pendingMatch.key, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setPasswordError("Password salah, coba lagi");
+        setPasswordLoading(false);
+        return;
+      }
+      if (pendingMatch.match.asUser) {
+        sessionStorage.setItem("modiusUser", pendingMatch.match.asUser);
+      }
+      startGreeting(pendingMatch.match.displayName, pendingMatch.match.path);
+    } catch {
+      setPasswordError("Gagal menghubungi server, coba lagi");
+      setPasswordLoading(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    if (!pendingMatch || hintLoading) return;
+    setHintLoading(true);
+    try {
+      const res = await fetch(
+        `/api/login?name=${encodeURIComponent(pendingMatch.key)}`,
+      );
+      const data = await res.json();
+      setHint(data.hint || "Hint tidak tersedia, tanya langsung ke adminnya");
+    } catch {
+      setHint("Gagal ambil hint, coba lagi");
+    } finally {
+      setHintLoading(false);
+    }
+  }
+
+  function backToNameStep() {
+    setStep("name");
+    setPendingMatch(null);
+    setPassword("");
+    setPasswordError("");
+    setHint(null);
+    setSetupPassword("");
+    setSetupHint("");
+    setSetupError("");
   }
 
   const footer = (
@@ -350,7 +503,6 @@ export default function HomePage() {
         opacity: 0.14;
       }
 
-      /* --- Efek portal saat pindah halaman --- */
       @keyframes portalZoomOut {
         0% {
           opacity: 1;
@@ -438,50 +590,198 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#0a0b0e] text-white flex items-center justify-center px-4 relative">
       {backdrop}
       {installButton}
-      <form onSubmit={handleSubmit} className="w-full max-w-sm relative">
-        <div className="relative logo-shine rounded-3xl w-fit mx-auto mb-8">
-          <div className="logo-glow" />
-          <img
-            src="/logo.png"
-            alt="Modius.id"
-            className="relative logo-entrance w-50 h-50 object-contain"
+
+      {step === "name" && (
+        <form onSubmit={handleNameSubmit} className="w-full max-w-sm relative">
+          <div className="relative logo-shine rounded-3xl w-fit mx-auto mb-8">
+            <div className="logo-glow" />
+            <img
+              src="/logo.png"
+              alt="Modius.id"
+              className="relative logo-entrance w-50 h-50 object-contain"
+            />
+          </div>
+          <h1
+            className="stagger text-2xl font-semibold mb-1 text-center"
+            style={{ animationDelay: "0.85s" }}
+          >
+            Modius System
+          </h1>
+          <p
+            className="stagger text-sm text-neutral-500 mb-8 text-center"
+            style={{ animationDelay: "0.95s" }}
+          >
+            Ketik nama kamu untuk masuk
+          </p>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError("");
+            }}
+            placeholder="Nama kamu..."
+            className="stagger w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-lg mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+            style={{ animationDelay: "1.05s" }}
+            autoFocus
           />
-        </div>
-        <h1
-          className="stagger text-2xl font-semibold mb-1 text-center"
-          style={{ animationDelay: "0.85s" }}
-        >
-          Modius System
-        </h1>
-        <p
-          className="stagger text-sm text-neutral-500 mb-8 text-center"
-          style={{ animationDelay: "0.95s" }}
-        >
-          Ketik nama kamu untuk masuk
+          {error && (
+            <p className="text-red-400 text-sm text-center mb-3">{error}</p>
+          )}
+          <button
+            type="submit"
+            className="stagger w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-lg font-semibold transition-colors"
+            style={{ animationDelay: "1.15s" }}
+          >
+            Masuk
+          </button>
+        </form>
+      )}
+
+      {step === "checking" && (
+        <p className="text-neutral-500 text-sm animate-fadeIn">
+          Memeriksa akun...
         </p>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            setError("");
-          }}
-          placeholder="Nama kamu..."
-          className="stagger w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-lg mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
-          style={{ animationDelay: "1.05s" }}
-          autoFocus
-        />
-        {error && (
-          <p className="text-red-400 text-sm text-center mb-3">{error}</p>
-        )}
-        <button
-          type="submit"
-          className="stagger w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-lg font-semibold transition-colors"
-          style={{ animationDelay: "1.15s" }}
+      )}
+
+      {step === "setup" && pendingMatch && (
+        <form
+          onSubmit={handleSetupSubmit}
+          className="w-full max-w-sm relative animate-fadeIn"
         >
-          Masuk
-        </button>
-      </form>
+          <div className="relative logo-shine rounded-3xl w-fit mx-auto mb-8">
+            <div className="logo-glow" />
+            <img
+              src={AVATARS[pendingMatch.match.displayName] || "/logo.png"}
+              alt={pendingMatch.match.displayName}
+              className={`w-24 h-24 ${
+                AVATARS[pendingMatch.match.displayName]
+                  ? "rounded-full object-cover"
+                  : "object-contain"
+              }`}
+            />
+          </div>
+          <h1 className="text-2xl font-semibold mb-1 text-center">
+            Hai, {pendingMatch.match.displayName}
+          </h1>
+          <p className="text-sm text-neutral-500 mb-6 text-center">
+            Ini pertama kali kamu masuk — buat password dulu
+          </p>
+          <input
+            type="password"
+            value={setupPassword}
+            onChange={(e) => {
+              setSetupPassword(e.target.value);
+              setSetupError("");
+            }}
+            placeholder="Bikin password..."
+            className="w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-lg mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+            autoFocus
+          />
+          <input
+            type="text"
+            value={setupHint}
+            onChange={(e) => {
+              setSetupHint(e.target.value);
+              setSetupError("");
+            }}
+            placeholder="Kata rahasia buat lupa password (misal: nama kucing)"
+            className="w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-sm mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+          />
+          {setupError && (
+            <p className="text-red-400 text-sm text-center mb-3">
+              {setupError}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={setupLoading}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white py-3.5 rounded-lg font-semibold transition-colors mb-4"
+          >
+            {setupLoading ? "Menyimpan..." : "Simpan password"}
+          </button>
+          <button
+            type="button"
+            onClick={backToNameStep}
+            className="w-full text-center text-xs text-neutral-500 hover:text-neutral-300"
+          >
+            &larr; Ganti nama
+          </button>
+        </form>
+      )}
+
+      {step === "password" && pendingMatch && (
+        <form
+          onSubmit={handlePasswordSubmit}
+          className="w-full max-w-sm relative animate-fadeIn"
+        >
+          <div className="relative logo-shine rounded-3xl w-fit mx-auto mb-8">
+            <div className="logo-glow" />
+            <img
+              src={AVATARS[pendingMatch.match.displayName] || "/logo.png"}
+              alt={pendingMatch.match.displayName}
+              className={`w-24 h-24 ${
+                AVATARS[pendingMatch.match.displayName]
+                  ? "rounded-full object-cover"
+                  : "object-contain"
+              }`}
+            />
+          </div>
+          <h1 className="text-2xl font-semibold mb-1 text-center">
+            Hai, {pendingMatch.match.displayName}
+          </h1>
+          <p className="text-sm text-neutral-500 mb-8 text-center">
+            Masukkan password kamu
+          </p>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setPasswordError("");
+            }}
+            placeholder="Password..."
+            className="w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-lg mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
+            autoFocus
+          />
+          {passwordError && (
+            <p className="text-red-400 text-sm text-center mb-3">
+              {passwordError}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={passwordLoading}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white py-3.5 rounded-lg font-semibold transition-colors mb-4"
+          >
+            {passwordLoading ? "Memeriksa..." : "Masuk"}
+          </button>
+
+          <div className="flex items-center justify-between text-xs">
+            <button
+              type="button"
+              onClick={backToNameStep}
+              className="text-neutral-500 hover:text-neutral-300"
+            >
+              &larr; Ganti nama
+            </button>
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              className="text-neutral-500 hover:text-neutral-300"
+            >
+              {hintLoading ? "Memuat hint..." : "Lupa password?"}
+            </button>
+          </div>
+
+          {hint && (
+            <p className="mt-4 text-center text-xs text-neutral-400 bg-white/5 border border-white/10 rounded-lg px-4 py-3 animate-fadeIn">
+              Hint: {hint}
+            </p>
+          )}
+        </form>
+      )}
+
       {footer}
       {styles}
     </div>
