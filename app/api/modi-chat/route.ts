@@ -58,12 +58,10 @@ export async function POST(req: Request) {
     const prompt = body.prompt || body.message || body.text || "";
     const userName = body.userName || body.username || body.name || "Hendi";
 
-    // Validasi nama pengguna
     const validUserName = userName.toLowerCase().includes("gita")
       ? "Kak Gita"
       : "Kak Hendi";
 
-    // Validasi pesan kosong
     if (!prompt || prompt.trim() === "") {
       return NextResponse.json(
         { reply: "Pesan tidak boleh kosong" },
@@ -72,18 +70,16 @@ export async function POST(req: Request) {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      console.error("GEMINI_API_KEY belum terpasang!");
+      console.error("❌ GEMINI_API_KEY belum terpasang!");
       return NextResponse.json(
         { reply: "Error: API Key belum terpasang" },
         { status: 500 },
       );
     }
 
-    // === Ambil riwayat & memori dari Supabase ===
     const longTermMemory = await getModiMemory();
     const shortTermHistory = await getChatHistory();
 
-    // Susun instruksi lengkap
     const systemInstruction = SYSTEM_INSTRUCTION_BASE.replace(
       "{{USER_NAME}}",
       validUserName,
@@ -92,7 +88,6 @@ export async function POST(req: Request) {
       longTermMemory || "Belum ada catatan khusus.",
     );
 
-    // Format riwayat chat + pesan terbaru
     const contents = shortTermHistory.map((chat) => ({
       role: chat.role,
       parts: [{ text: chat.content }],
@@ -102,11 +97,12 @@ export async function POST(req: Request) {
       parts: [{ text: prompt }],
     });
 
-    // Simpan pesan user ke database
     await saveChat(validUserName, "user", prompt);
 
-    // Panggil API — pakai model yang sudah terbukti berfungsi
-    const response = await ai.models.generateContent({
+    console.log("📤 Mengirim ke Gemini...");
+
+    // === Panggil Gemini ===
+    const result = await ai.models.generateContent({
       model: "gemini-3.6-flash",
       contents: contents,
       config: {
@@ -115,15 +111,25 @@ export async function POST(req: Request) {
       },
     });
 
-    // ✅ Cek aman — hindari error "cannot read properties of null"
+    // === Baca respons dengan AMAN ===
     let aiReply = "Maaf Kak, Modi agak linglung sebentar 😊 Bisa diulang?";
-    if (response?.text) {
-      aiReply = response.text;
-    } else {
-      console.error("Respons Gemini kosong:", response);
+
+    // === Baca respons dengan AMAN — sesuai SDK @google/genai ===
+    try {
+      // SDK @google/genai langsung kasih datanya, TIDAK pakai .response lagi!
+      const candidate = result.candidates?.[0]; // ❌ hapus .response di sini!
+      const text = candidate?.content?.parts?.map((p: any) => p.text).join("");
+
+      if (text && text.trim()) {
+        aiReply = text;
+      } else {
+        console.warn("⚠️ Isi respons kosong:", JSON.stringify(result, null, 2));
+      }
+    } catch (parseErr) {
+      console.error("❌ Gagal baca isi respons:", parseErr);
     }
 
-    // Cek & simpan memori baru
+    // === Cek memori ===
     const memoryMatch = aiReply.match(
       /<UPDATE_MEMORY>([\s\S]*?)<\/UPDATE_MEMORY>/,
     );
@@ -138,15 +144,17 @@ export async function POST(req: Request) {
         .trim();
     }
 
-    // Simpan jawaban AI ke database
     await saveChat(validUserName, "model", aiReply);
 
+    console.log("✅ Berhasil balas:", aiReply.slice(0, 50) + "...");
+
     return NextResponse.json({ reply: aiReply });
-  } catch (error: any) {
-    console.error("Gemini API Error:", error);
-    const pesanError = error?.message || "Terjadi kesalahan tidak diketahui";
+  } catch (err: any) {
+    console.error("❌ Error utama:", err);
+    // Baca pesan error dengan AMAN
+    const msg = err?.message || err?.toString() || "Tidak ada keterangan";
     return NextResponse.json(
-      { reply: `Gagal terhubung: ${pesanError}` },
+      { reply: `Modi kesulitan: ${msg}` },
       { status: 500 },
     );
   }
