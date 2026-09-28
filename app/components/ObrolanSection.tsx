@@ -45,6 +45,8 @@ export default function ObrolanSection({
   const [aiTyping, setAiTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const userLabel = `Kak ${currentUser}`;
+
   // === Muat Riwayat & Pantau Real-time ===
   useEffect(() => {
     loadHistory();
@@ -56,9 +58,17 @@ export default function ObrolanSection({
         { event: "INSERT", schema: "public", table: "modius_chats" },
         (payload) => {
           const newMsg = payload.new as ChatMessage;
+          console.log("📩 Pesan baru masuk:", newMsg);
+
           // Tampilkan hanya untuk pengguna yang sedang aktif
-          if (newMsg.user_name === `Kak ${currentUser}`) {
-            setModiMessages((prev) => [...prev, newMsg]);
+          if (newMsg.user_name === userLabel) {
+            setModiMessages((prev) => {
+              // Cegah pesan ganda — kalau sudah ada, lewati
+              const exists = prev.some((m) => m.id === newMsg.id);
+              if (exists) return prev;
+              return [...prev, newMsg];
+            });
+
             // Sembunyikan indikator mengetik saat balasan muncul
             if (newMsg.role === "model") {
               setAiTyping(false);
@@ -71,7 +81,7 @@ export default function ObrolanSection({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser]);
+  }, [currentUser, userLabel]);
 
   // Auto scroll ke bawah
   useEffect(() => {
@@ -82,7 +92,6 @@ export default function ObrolanSection({
   async function loadHistory() {
     setLoading(true);
     const cutoff = new Date(Date.now() - CHAT_TTL_MS).toISOString();
-    const userLabel = `Kak ${currentUser}`;
 
     // Hapus pesan yang sudah lewat 24 jam
     await supabase.from("modius_chats").delete().lt("created_at", cutoff);
@@ -101,14 +110,13 @@ export default function ObrolanSection({
           id: 0,
           user_name: userLabel,
           role: "model",
-          content: `Halo ${userLabel}! Saya Modi, kita belajar bersama ya 😊 Ada yang mau dibahas atau sekadar ngobrol santai?`,
+          content: `Halo Kak ${userLabel}! Saya Modi, AI Modius 😊 Ada yang bisa Modi bantu atau sekadar ngobrol santai jangan sungkan ya kak bebas ko?`,
           created_at: new Date().toISOString(),
         },
       ]);
     } else {
       setModiMessages(data);
     }
-
     setLoading(false);
   }
 
@@ -121,11 +129,10 @@ export default function ObrolanSection({
     setSending(true);
     setAiTyping(true);
 
-    const userLabel = `Kak ${currentUser}`;
-
-    // ✅ Tampilkan pesan user LANGSUNG — gak nunggu refresh!
+    // ✅ Tampilkan pesan user LANGSUNG di layar
+    const tempId = Date.now();
     const tempUserMsg: ChatMessage = {
-      id: Date.now(),
+      id: tempId,
       user_name: userLabel,
       role: "user",
       content: body,
@@ -144,7 +151,10 @@ export default function ObrolanSection({
       });
 
       if (!res.ok) throw new Error("Gagal kirim ke API");
-      // Balasan muncul otomatis lewat realtime
+
+      // ✅ Pesan balasan akan muncul otomatis lewat realtime
+      // Hapus pesan sementara user setelah disimpan ke DB
+      setModiMessages((prev) => prev.filter((m) => m.id !== tempId));
     } catch (err) {
       console.error("Error kirim pesan:", err);
       setAiTyping(false);
@@ -269,6 +279,7 @@ export default function ObrolanSection({
             </div>
           </div>
         )}
+
         <div ref={bottomRef} />
       </div>
 
