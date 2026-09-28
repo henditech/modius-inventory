@@ -56,14 +56,15 @@ export default function ObrolanSection({
         { event: "INSERT", schema: "public", table: "modius_chats" },
         (payload) => {
           const newMsg = payload.new as ChatMessage;
-          // Tampilkan hanya untuk pengguna yang sedang aktif
-          if (newMsg.user_name === `Kak ${currentUser}`) {
-            setModiMessages((prev) => [...prev, newMsg]);
-            // Sembunyikan indikator mengetik saat balasan muncul
-            if (newMsg.role === "model") {
-              setAiTyping(false);
-            }
-          }
+          if (newMsg.user_name !== `Kak ${currentUser}`) return;
+
+          // Pesan user sudah ditampilkan lokal saat kirim, jadi skip
+          if (newMsg.role === "user") return;
+
+          setModiMessages((prev) =>
+            prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg],
+          );
+          setAiTyping(false);
         },
       )
       .subscribe();

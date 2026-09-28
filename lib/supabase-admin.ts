@@ -18,17 +18,19 @@ export const supabaseAdmin = createClient(supabaseUrl!, serviceKey!, {
 });
 
 // Fungsi untuk mengambil riwayat percakapan
-export async function getChatHistory() {
+export async function getChatHistory(userName: string) {
   const { data, error } = await supabaseAdmin
     .from("modius_chats")
     .select("role, content")
-    .order("created_at", { ascending: true });
+    .eq("user_name", userName)
+    .order("created_at", { ascending: false })
+    .limit(30);
 
   if (error) {
     console.error("❌ Gagal ambil history:", error);
     return [];
   }
-  return data || [];
+  return (data || []).reverse();
 }
 
 // Fungsi untuk menyimpan chat baru

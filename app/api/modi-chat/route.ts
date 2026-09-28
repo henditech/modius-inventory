@@ -62,7 +62,7 @@ export const maxDuration = 30; // biar tidak kena timeout Vercel saat retry
 
 const MODELS = [
   "gemini-3.6-flash",
-  "gemini-2.5-flash", // model cadangan, isi dengan yang tersedia di akunmu
+  "gemini-3.8-flash", // model cadangan, isi dengan yang tersedia di akunmu
 ];
 
 async function generateWithRetry(params: { contents: any; config: any }) {
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
     }
 
     const longTermMemory = await getModiMemory();
-    const shortTermHistory = await getChatHistory();
+    const shortTermHistory = await getChatHistory(validUserName);
 
     const systemInstruction = SYSTEM_INSTRUCTION_BASE.replace(
       "{{USER_NAME}}",
