@@ -46,27 +46,49 @@ export default function ObrolanSection({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // === Muat Riwayat & Pantau Real-time ===
+  // === Muat Riwayat & Pantau Real-time ===
   useEffect(() => {
     loadHistory();
+
+    const userLabel = `Kak ${currentUser}`; // Definisikan di sini biar konsisten
+
+    console.log("Memantau pesan untuk:", userLabel); // Cek di console
 
     const channel = supabase
       .channel("modi_chat_live")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "modius_chats" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "modius_chats",
+        },
         (payload) => {
+          console.log("✅ Pesan baru masuk dari Supabase:", payload.new); // Cek apakah ini muncul
+
           const newMsg = payload.new as ChatMessage;
-          // Tampilkan hanya untuk pengguna yang sedang aktif
-          if (newMsg.user_name === `Kak ${currentUser}`) {
+
+          // Bandingkan persis
+          if (newMsg.user_name === userLabel) {
+            console.log("✅ Cocok, ditampilkan:", newMsg);
             setModiMessages((prev) => [...prev, newMsg]);
-            // Sembunyikan indikator mengetik saat balasan muncul
+
             if (newMsg.role === "model") {
               setAiTyping(false);
             }
+          } else {
+            console.log(
+              "❌ Bukan untuk pengguna ini. Harus:",
+              userLabel,
+              "Dapat:",
+              newMsg.user_name,
+            );
           }
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("📡 Status koneksi realtime:", status); // Cek apakah "SUBSCRIBED"
+      });
 
     return () => {
       supabase.removeChannel(channel);
