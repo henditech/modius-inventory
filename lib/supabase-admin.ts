@@ -31,6 +31,7 @@ export async function saveChat(
     .insert([{ user_name: userName, role, content }]);
 
   if (error) console.error("Gagal simpan chat:", error);
+  throw error;
 }
 
 // Fungsi untuk mengambil memori jangka panjang Modi
