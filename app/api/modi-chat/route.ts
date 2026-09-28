@@ -97,7 +97,15 @@ export async function POST(req: Request) {
       parts: [{ text: prompt }],
     });
 
-    await saveChat(validUserName, "user", prompt);
+    try {
+      await saveChat(validUserName, "user", prompt);
+    } catch (e) {
+      console.error("Gagal simpan user:", e);
+      return NextResponse.json(
+        { reply: "Database sibuk sebentar 😊 Coba kirim lagi ya" },
+        { status: 500 },
+      );
+    }
 
     console.log("📤 Mengirim ke Gemini...");
 
@@ -144,7 +152,11 @@ export async function POST(req: Request) {
         .trim();
     }
 
-    await saveChat(validUserName, "model", aiReply);
+    try {
+      await saveChat(validUserName, "model", aiReply);
+    } catch (e) {
+      console.error("Gagal simpan balasan:", e);
+    }
 
     console.log("✅ Berhasil balas:", aiReply.slice(0, 50) + "...");
 
