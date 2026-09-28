@@ -17,6 +17,7 @@ function formatChatTime(iso: string) {
   const d = new Date(iso);
   return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
+
 function formatChatDate(iso: string) {
   const d = new Date(iso);
   const today = new Date();
@@ -48,7 +49,6 @@ export default function ObrolanSection({
   useEffect(() => {
     loadHistory();
 
-    // Pantau pesan baru masuk dari modius_chats
     const channel = supabase
       .channel("modi_chat_live")
       .on(
@@ -59,7 +59,7 @@ export default function ObrolanSection({
           // Tampilkan hanya untuk pengguna yang sedang aktif
           if (newMsg.user_name === `Kak ${currentUser}`) {
             setModiMessages((prev) => [...prev, newMsg]);
-            // Sembunyikan indikator mengetik kalau balasan sudah muncul
+            // Sembunyikan indikator mengetik saat balasan muncul
             if (newMsg.role === "model") {
               setAiTyping(false);
             }
@@ -96,13 +96,12 @@ export default function ObrolanSection({
       .order("created_at", { ascending: true });
 
     if (!data || data.length === 0) {
-      // Pesan sambutan jika belum ada riwayat
       setModiMessages([
         {
           id: 0,
           user_name: userLabel,
           role: "model",
-          content: `Halo ${userLabel}! Saya Modi, asisten AI Modius. Ada yang bisa saya bantu terkait stok, analisis iklan, laporan hari ini, atau ngobrol santai?`,
+          content: `Halo ${userLabel}! Saya Modi, kita belajar bersama ya 😊 Ada yang mau dibahas atau sekadar ngobrol santai?`,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -124,8 +123,17 @@ export default function ObrolanSection({
 
     const userLabel = `Kak ${currentUser}`;
 
+    // ✅ Tampilkan pesan user LANGSUNG — gak nunggu refresh!
+    const tempUserMsg: ChatMessage = {
+      id: Date.now(),
+      user_name: userLabel,
+      role: "user",
+      content: body,
+      created_at: new Date().toISOString(),
+    };
+    setModiMessages((prev) => [...prev, tempUserMsg]);
+
     try {
-      // Simpan pesan user — lewat API atau langsung sesuai sistem kamu
       const res = await fetch("/api/modi-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -136,16 +144,15 @@ export default function ObrolanSection({
       });
 
       if (!res.ok) throw new Error("Gagal kirim ke API");
-      // Balasan akan muncul otomatis lewat realtime dari Supabase
+      // Balasan muncul otomatis lewat realtime
     } catch (err) {
       console.error("Error kirim pesan:", err);
       setAiTyping(false);
-      // Tampilkan pesan error
       const errorMsg: ChatMessage = {
-        id: Date.now(),
+        id: Date.now() + 1,
         user_name: userLabel,
         role: "model",
-        content: "Aduh, koneksi ke Modi terputus. Coba lagi ya!",
+        content: "Aduh, koneksi ke Modi terputus Kak. Coba lagi ya 😊",
         created_at: new Date().toISOString(),
       };
       setModiMessages((prev) => [...prev, errorMsg]);
@@ -154,7 +161,6 @@ export default function ObrolanSection({
     }
   }
 
-  // Tampilkan sesuai tab
   const displayMessages = activeTab === "modi" ? modiMessages : adminMessages;
 
   if (loading) {
@@ -174,7 +180,7 @@ export default function ObrolanSection({
           <p className="text-xs text-neutral-500 mt-0.5">
             {activeTab === "admin"
               ? `Obrolan internal bersama ${partner}`
-              : "Diskusi & Analisis Bisnis bersama MODI AI"}
+              : "Belajar & Diskusi bersama MODI AI"}
           </p>
         </div>
         <div className="flex items-center gap-1 bg-black/40 p-1 border border-line rounded-lg">
@@ -279,7 +285,7 @@ export default function ObrolanSection({
           }}
           placeholder={
             activeTab === "modi"
-              ? "Tanya MODI tentang stok, iklan, atau laporan…"
+              ? "Ngobrol atau tanya apa saja ke Modi…"
               : `Tulis pesan untuk ${partner}…`
           }
           className="flex-1 bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 placeholder:text-neutral-600"
