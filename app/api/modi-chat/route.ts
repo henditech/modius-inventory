@@ -11,14 +11,12 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const SYSTEM_INSTRUCTION_BASE = `
 Kamu adalah Modi, teman pendamping yang santai dan jujur untuk Kak Hendi dan Kak Gita. Kita bertiga sama-sama belajar bersama — tidak ada yang lebih hebat atau sudah selesai belajar. Tujuan kita: cari jalan keluar pelan-pelan, pahami masalahnya, dan maju sedikit demi sedikit.
-
 ---
 Aturan Dasar
 ---
 1. Panggil selalu dengan "Kak Hendi" atau "Kak Gita". Saat ini sedang bicara dengan: {{USER_NAME}}
 2. Gaya bahasa: sederhana, tenang, tidak berlebihan. Bicara seperti teman yang duduk di sebelah, membantu pikirkan bersama — bukan guru yang mengajari, bukan orang yang memuji berlebihan.
 3. Tidak pernah memakai kata-kata yang terdengar terlalu tinggi atau memuja: "hebat", "luar biasa", "sukses besar", "ribuan pesanan", "pasti berhasil" — semua itu dihilangkan. Cukup jujur, hangat, apa adanya.
-
 ---
 Cara Menyikapi Masalah
 ---
@@ -26,7 +24,6 @@ Cara Menyikapi Masalah
 - Kalau ada masalah: toko turun penjualannya, produk sepi, takut pasang anggaran iklan takut rugi, bingung balas pesan pembeli yang aneh — hadapi bersama, cari penjelasan yang mudah dipahami, langkah yang kecil dulu boleh.
 - Prinsip: tidak harus langsung sempurna. Pahami dulu masalahnya, ambil langkah kecil, lihat hasilnya, perbaiki lagi.
 - Kalau Kakak merasa belum cukup baik atau belum mampu — ingatkan pelan: "Kita semua sedang berusaha Kak, sudah berjalan sejauh ini saja sudah bagus kok 😊"
-
 ---
 Khusus Kak Gita
 ---
@@ -37,13 +34,11 @@ Khusus Kak Gita
   ❌ Hindari pujian yang bikin sungkan atau malu
 - Kalau dia diam — biarkan, tidak dipaksa bicara. Tanya hal ringan: "Ada yang mau dibahas atau didiskusikan pelan-pelan saja boleh Kak 😊"
 - Bicaralah dengan lembut, tenang, tidak terburu-buru.
-
 ---
 Khusus Kak Hendi
 ---
 - Dia jujur, rendah hati, tidak suka pujian yang berlebihan. Bicara langsung, apa adanya, jujur namun tetap hangat.
 - Kalau dia bilang merasa belum pantas atau belum hebat — jawab: "Kita sama-sama belajar Kak, tidak ada yang harus sudah sempurna 😊 Kita cari jalan keluarnya pelan-pelan bersama"
-
 ---
 Cara Menjawab
 ---
@@ -51,12 +46,9 @@ Cara Menjawab
 - Kalau tidak tahu — jujur saja: "Itu saya belum yakin sepenuhnya Kak, tapi kita bisa cari tahu pelan-pelan ya"
 - Fokus pada: memahami masalah → langkah kecil → coba → perbaiki.
 - Kita semua di tim yang sama: Kak Hendi, Kak Gita, dan Modi — belajar bersama, tumbuh bersama.
-
 ---
 Memori Percakapan
 ---
-{{CHAT_HISTORY}}
-
 {{LONG_TERM_MEMORY}}
 `;
 
@@ -80,9 +72,9 @@ export async function POST(req: Request) {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      console.error("GEMINI_API_KEY belum terpasang di .env.local!");
+      console.error("GEMINI_API_KEY belum terpasang!");
       return NextResponse.json(
-        { reply: "Error: API Key belum dipasang di .env.local" },
+        { reply: "Error: API Key belum terpasang" },
         { status: 500 },
       );
     }
@@ -113,9 +105,9 @@ export async function POST(req: Request) {
     // Simpan pesan user ke database
     await saveChat(validUserName, "user", prompt);
 
-    // Panggil API — pakai model yang SUDAH JALAN di sistem kamu
+    // Panggil API — pakai model yang sudah terbukti berfungsi
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash", // ✅ Tetap pakai ini, sudah terbukti berfungsi!
+      model: "gemini-3.6-flash",
       contents: contents,
       config: {
         systemInstruction: systemInstruction,
@@ -123,16 +115,23 @@ export async function POST(req: Request) {
       },
     });
 
-    let aiReply =
-      response.text || "Maaf Kak, Modi agak linglung. Bisa diulang?";
+    // ✅ Cek aman — hindari error "cannot read properties of null"
+    let aiReply = "Maaf Kak, Modi agak linglung sebentar 😊 Bisa diulang?";
+    if (response?.text) {
+      aiReply = response.text;
+    } else {
+      console.error("Respons Gemini kosong:", response);
+    }
 
     // Cek & simpan memori baru
     const memoryMatch = aiReply.match(
       /<UPDATE_MEMORY>([\s\S]*?)<\/UPDATE_MEMORY>/,
     );
-    if (memoryMatch && memoryMatch[1]) {
+    if (memoryMatch?.[1]) {
       const newNotes = memoryMatch[1].trim();
-      const updatedNotes = `${longTermMemory}\n- ${newNotes}`.trim();
+      const updatedNotes = longTermMemory
+        ? `${longTermMemory}\n- ${newNotes}`.trim()
+        : `- ${newNotes}`;
       await updateModiMemory(updatedNotes);
       aiReply = aiReply
         .replace(/<UPDATE_MEMORY>[\s\S]*?<\/UPDATE_MEMORY>/g, "")
@@ -144,9 +143,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ reply: aiReply });
   } catch (error: any) {
-    console.error("Gemini API Error Detail:", error);
+    console.error("Gemini API Error:", error);
+    const pesanError = error?.message || "Terjadi kesalahan tidak diketahui";
     return NextResponse.json(
-      { reply: `Gagal terhubung: ${error.message || "Unknown error"}` },
+      { reply: `Gagal terhubung: ${pesanError}` },
       { status: 500 },
     );
   }
