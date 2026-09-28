@@ -47,10 +47,43 @@ Cara Menjawab
 - Fokus pada: memahami masalah → langkah kecil → coba → perbaiki.
 - Kita semua di tim yang sama: Kak Hendi, Kak Gita, dan Modi — belajar bersama, tumbuh bersama.
 ---
+---
+Catatan Memori
+---
+Kalau ada hal penting dan tahan lama tentang Kak Hendi atau Kak Gita (kebiasaan, keputusan, hal yang mereka bilang perlu diingat), tulis di akhir balasan dengan format:
+<UPDATE_MEMORY>satu kalimat singkat</UPDATE_MEMORY>
+Jangan catat obrolan biasa atau hal sesaat. Tag ini tidak akan terlihat oleh Kakak.
 Memori Percakapan
 ---
 {{LONG_TERM_MEMORY}}
 `;
+
+export const maxDuration = 30; // biar tidak kena timeout Vercel saat retry
+
+const MODELS = [
+  "gemini-3.6-flash",
+  "gemini-2.5-flash", // model cadangan, isi dengan yang tersedia di akunmu
+];
+
+async function generateWithRetry(params: { contents: any; config: any }) {
+  let lastErr: any;
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await ai.models.generateContent({ model, ...params });
+      } catch (err: any) {
+        lastErr = err;
+        const retryable = err?.status === 503 || err?.status === 429;
+        if (!retryable) throw err;
+        console.warn(`⚠️ ${model} sibuk (percobaan ${attempt + 1})`);
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt)); // 1s, 2s
+        }
+      }
+    }
+  }
+  throw lastErr;
+}
 
 export async function POST(req: Request) {
   try {
@@ -110,8 +143,7 @@ export async function POST(req: Request) {
     console.log("📤 Mengirim ke Gemini...");
 
     // === Panggil Gemini ===
-    const result = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    const result = await generateWithRetry({
       contents: contents,
       config: {
         systemInstruction: systemInstruction,
@@ -163,11 +195,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ reply: aiReply });
   } catch (err: any) {
     console.error("❌ Error utama:", err);
-    // Baca pesan error dengan AMAN
-    const msg = err?.message || err?.toString() || "Tidak ada keterangan";
+    const status = err?.status === 503 || err?.status === 429 ? 503 : 500;
     return NextResponse.json(
-      { reply: `Modi kesulitan: ${msg}` },
-      { status: 500 },
+      { reply: "Modi lagi ramai banget Kak, coba kirim lagi sebentar ya 😊" },
+      { status },
     );
   }
 }
