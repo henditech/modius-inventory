@@ -1,33 +1,27 @@
 "use client";
-
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/lib/supabase"; // Sesuaikan path supabase kamu
+import { supabase } from "@/lib/supabase";
 
 type AdminUser = "Hendi" | "Gita";
-
 type ChatMessage = {
   id: string;
   sender: AdminUser | "Modi";
   body: string;
   created_at: string;
+  type?: "admin" | "modi"; // ← bedakan pesan
 };
 
 const CHAT_TTL_MS = 24 * 60 * 60 * 1000; // 24 jam
-
 function formatChatTime(iso: string) {
   const d = new Date(iso);
   return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
-
 function formatChatDate(iso: string) {
   const d = new Date(iso);
   const today = new Date();
   const isToday = d.toDateString() === today.toDateString();
   if (isToday) return "Hari ini";
-  return d.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "long",
-  });
+  return d.toLocaleDateString("id-ID", { day: "numeric", month: "long" });
 }
 
 export default function ObrolanSection({
@@ -40,155 +34,160 @@ export default function ObrolanSection({
   const partner: AdminUser = currentUser === "Hendi" ? "Gita" : "Hendi";
   const partnerOnline = onlineUsers.includes(partner);
 
-  // Tab Active: Mode obrolan dengan Partner (Admin) atau MODI (AI)
   const [activeTab, setActiveTab] = useState<"admin" | "modi">("admin");
-
-  // State Pesan Terpisah
   const [adminMessages, setAdminMessages] = useState<ChatMessage[]>([]);
-  const [modiMessages, setModiMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome-modi",
-      sender: "Modi",
-      body: `Halo ${currentUser}! Saya Modi, asisten AI Modius. Ada yang bisa saya bantu terkait stok, analisis iklan, laporan hari ini, atau ngobrol santai?`,
-      created_at: new Date().toISOString(),
-    },
-  ]);
-
+  const [modiMessages, setModiMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [aiTyping, setAiTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Realtime & Load data khusus Pesan Admin
+  // === LOAD RIWAYAT MODI DARI SUPABASE ===
   useEffect(() => {
-    loadAdminMessages();
-
+    loadAllMessages();
     const channel = supabase
       .channel("chat_messages_feed")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages" },
         (payload) => {
-          setAdminMessages((prev) => [...prev, payload.new as ChatMessage]);
+          const msg = payload.new as ChatMessage;
+          if (msg.type === "modi") {
+            setModiMessages((prev) => [...prev, msg]);
+          } else {
+            setAdminMessages((prev) => [...prev, msg]);
+          }
         },
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [currentUser]);
 
-  // Auto scroll ke paling bawah saat ada pesan baru
+  // Auto scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [adminMessages, modiMessages, activeTab, aiTyping]);
 
-  async function loadAdminMessages() {
+  async function loadAllMessages() {
     setLoading(true);
-    // Bersihkan pesan admin yang lebih dari 24 jam
     const cutoff = new Date(Date.now() - CHAT_TTL_MS).toISOString();
+
+    // Hapus pesan yang sudah lewat 24 jam
     await supabase.from("chat_messages").delete().lt("created_at", cutoff);
 
-    // Ambil sisa pesan admin
-    const { data } = await supabase
+    // Ambil pesan Admin
+    const { data: adminData } = await supabase
       .from("chat_messages")
       .select("*")
+      .eq("type", "admin")
       .gte("created_at", cutoff)
       .order("created_at", { ascending: true });
 
-    setAdminMessages((data as ChatMessage[]) ?? []);
+    // Ambil pesan Modi sesuai pengguna
+    const { data: modiData } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("type", "modi")
+      .eq("recipient", currentUser) // ← supaya masing-masing punya riwayat sendiri
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: true });
+
+    // Jika belum ada riwayat Modi → tampilkan pesan sambutan
+    if (!modiData || modiData.length === 0) {
+      setModiMessages([
+        {
+          id: "welcome-modi",
+          sender: "Modi",
+          body: `Halo ${currentUser}! Saya Modi, asisten AI Modius. Ada yang bisa saya bantu terkait stok, analisis iklan, laporan hari ini, atau ngobrol santai?`,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    } else {
+      setModiMessages(modiData as ChatMessage[]);
+    }
+
+    setAdminMessages((adminData as ChatMessage[]) ?? []);
     setLoading(false);
   }
 
-  async function askGemini(userInput: string) {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userInput }),
-    });
-
-    const data = await res.json();
-    console.log("Jawaban Gemini:", data.text);
-  }
-
-  // Kirim Pesan (Logic terpisah berdasarkan activeTab)
   async function handleSend() {
     const body = text.trim();
     if (!body || sending || aiTyping) return;
 
     if (activeTab === "admin") {
-      // --- MODE CHAT ADMIN ---
+      // === MODE CHAT ADMIN ===
       setSending(true);
       setText("");
-
       const { error } = await supabase.from("chat_messages").insert({
         sender: currentUser,
         body,
+        type: "admin",
       });
-
       if (error) {
         console.error(error);
-        setText(body); // Kembalikan teks jika gagal
+        setText(body);
       }
       setSending(false);
     } else {
-      // --- MODE CHAT MODI (AI) ---
+      // === MODE CHAT MODI ===
       setText("");
-      const userMsg: ChatMessage = {
-        id: Date.now().toString(),
-        sender: currentUser,
-        body,
-        created_at: new Date().toISOString(),
-      };
-
-      // Tambahkan pesan user ke UI MODI
-      setModiMessages((prev) => [...prev, userMsg]);
       setAiTyping(true);
 
+      // Simpan pesan user ke Supabase
+      const userMsg = {
+        sender: currentUser,
+        body,
+        type: "modi",
+        recipient: currentUser, // ← pemilik sesi ini
+      };
+      const { error: insertErr } = await supabase
+        .from("chat_messages")
+        .insert(userMsg);
+      if (insertErr) console.error("Gagal simpan pesan user:", insertErr);
+
       try {
-        // Panggil API Gemini
         const res = await fetch("/api/modi-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: body,
-            user: currentUser,
-            history: modiMessages.slice(-6),
+            userName: currentUser,
           }),
         });
-
         const data = await res.json();
 
-        const modiReply: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+        // Simpan jawaban Modi ke Supabase
+        await supabase.from("chat_messages").insert({
           sender: "Modi",
           body: data.reply || "Maaf, Modi sedang mengalami kendala jaringan.",
-          created_at: new Date().toISOString(),
-        };
-
-        setModiMessages((prev) => [...prev, modiReply]);
+          type: "modi",
+          recipient: currentUser,
+        });
+        // Realtime akan otomatis menambah ke state, jadi tidak perlu set manual
       } catch (err) {
         console.error(err);
-        setModiMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            sender: "Modi",
-            body: "Aduh, koneksi ke Modi terputus. Coba lagi ya!",
-            created_at: new Date().toISOString(),
-          },
-        ]);
+        await supabase.from("chat_messages").insert({
+          sender: "Modi",
+          body: "Aduh, koneksi ke Modi terputus. Coba lagi ya!",
+          type: "modi",
+          recipient: currentUser,
+        });
       } finally {
         setAiTyping(false);
       }
     }
   }
 
-  // Pilih dataset pesan mana yang ditampilkan berdasarkan Tab
   const currentDisplayMessages =
     activeTab === "admin" ? adminMessages : modiMessages;
+
+  if (loading)
+    return (
+      <div className="p-4 text-center text-neutral-400">Memuat riwayat...</div>
+    );
 
   return (
     <div className="animate-fadeIn max-w-2xl mx-auto flex flex-col h-[calc(100vh-160px)]">
@@ -202,8 +201,6 @@ export default function ObrolanSection({
               : "Diskusi & Analisis Bisnis bersama MODI AI"}
           </p>
         </div>
-
-        {/* Tab Controls */}
         <div className="flex items-center gap-1 bg-black/40 p-1 border border-line rounded-lg self-start sm:self-auto">
           <button
             onClick={() => setActiveTab("admin")}
@@ -220,7 +217,6 @@ export default function ObrolanSection({
             />
             {partner}
           </button>
-
           <button
             onClick={() => setActiveTab("modi")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
@@ -244,7 +240,6 @@ export default function ObrolanSection({
             !prev ||
             new Date(prev.created_at).toDateString() !==
               new Date(m.created_at).toDateString();
-
           return (
             <div key={m.id}>
               {showDateDivider && (
@@ -262,13 +257,11 @@ export default function ObrolanSection({
                         : "bg-white/5 border border-line text-neutral-100 rounded-bl-sm"
                   }`}
                 >
-                  {/* Badge Identitas jika balasan dari MODI */}
                   {isModi && (
                     <div className="flex items-center gap-1 text-[11px] font-semibold text-accent-400 mb-1">
                       <span>✨ MODI</span>
                     </div>
                   )}
-
                   <p className="whitespace-pre-wrap break-words leading-relaxed">
                     {m.body}
                   </p>
@@ -284,8 +277,6 @@ export default function ObrolanSection({
             </div>
           );
         })}
-
-        {/* Indicator saat MODI sedang berpikir */}
         {activeTab === "modi" && aiTyping && (
           <div className="flex justify-start">
             <div className="bg-accent-950/30 border border-accent-500/20 text-neutral-400 px-3 py-2 rounded-2xl rounded-bl-sm text-xs flex items-center gap-2">
@@ -293,7 +284,6 @@ export default function ObrolanSection({
             </div>
           </div>
         )}
-
         <div ref={bottomRef} />
       </div>
 
