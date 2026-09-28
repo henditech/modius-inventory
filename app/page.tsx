@@ -665,7 +665,7 @@ export default function HomePage() {
             Hai, {pendingMatch.match.displayName}
           </h1>
           <p className="text-sm text-neutral-500 mb-6 text-center">
-            Ini pertama kali kamu masuk — buat password dulu
+            Buat password dulu ya — Bebas aja
           </p>
           <input
             type="password"
@@ -685,7 +685,7 @@ export default function HomePage() {
               setSetupHint(e.target.value);
               setSetupError("");
             }}
-            placeholder="Kata rahasia buat lupa password (misal: nama kesayangan)"
+            placeholder="Kata rahasia untuk lupa password (misal: nama kucing atau apa saja)"
             className="w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-sm mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
           />
           {setupError && (
