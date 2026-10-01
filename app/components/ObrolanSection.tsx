@@ -102,7 +102,13 @@ export default function ObrolanSection({
           id: 0,
           user_name: userLabel,
           role: "model",
-          content: `Halo ${userLabel}! Saya Modi, AI Modius 😊 Mau analisa performa produk, susun strategi beriklan, buat laporan, atau cuma mau diskusi santai? Modi siap bantu kapan saja!`,
+          content: `Halo ${userLabel}! Saya Modi, AI Modius 😊 Ada yang bisa Modi bantu?
+Modi bisa bantu kamu untuk:
+• Analisis stok & performa produk 📊
+• Strategi beriklan & bikin laporan 📈
+• Rangkai kata-kata balasan chat pembeli (bisa nanganin pembeli rewel/unik!) 💬
+• Diskusi & ngobrol santai ☕
+Tinggal ketik saja di bawah, Modi siap bantu kapan saja!`,
           created_at: new Date().toISOString(),
         },
       ]);
