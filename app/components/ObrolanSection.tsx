@@ -102,7 +102,7 @@ export default function ObrolanSection({
           id: 0,
           user_name: userLabel,
           role: "model",
-          content: `Halo kak ${userLabel}! Saya Modi, AI Modius 😊 Ada yang bisa Modi bantu atau sekadar ngobrol santai bebas ko jangan sungkan ya?`,
+          content: `Halo ${userLabel}! Saya Modi, AI Modius 😊 Mau analisa performa produk, susun strategi beriklan, buat laporan, atau cuma mau diskusi santai? Modi siap bantu kapan saja!`,
           created_at: new Date().toISOString(),
         },
       ]);
