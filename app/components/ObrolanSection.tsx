@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import ReactMarkdown from "react-markdown";
 
 type AdminUser = "Hendi" | "Gita";
 type ChatMessage = {
@@ -252,9 +253,32 @@ Tinggal ketik saja di bawah, Modi siap bantu kapan saja!`,
                       <span>✨ MODI</span>
                     </div>
                   )}
-                  <p className="whitespace-pre-wrap break-words leading-relaxed">
-                    {m.content}
-                  </p>
+                  <div className="break-words leading-relaxed">
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => (
+                          <p className="mb-2 last:mb-0">{children}</p>
+                        ),
+                        strong: ({ children }) => (
+                          <strong className="font-semibold text-white">
+                            {children}
+                          </strong>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="list-decimal pl-5 mb-2 space-y-1">
+                            {children}
+                          </ol>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="list-disc pl-5 mb-2 space-y-1">
+                            {children}
+                          </ul>
+                        ),
+                      }}
+                    >
+                      {m.content}
+                    </ReactMarkdown>
+                  </div>
                   <span
                     className={`block text-[10px] mt-1.5 ${
                       isUser ? "text-white/70" : "text-neutral-500"
