@@ -33,10 +33,14 @@ const ROUTES: Record<
     displayName: "Gita",
     requiresPassword: true,
   },
-  scanner: { path: "/scan", displayName: "Scanner" },
-  scan: { path: "/scan", displayName: "Scanner" },
+
   stok: { path: "/stok-live", displayName: "Stok Live" },
   host: { path: "/stok-live", displayName: "Stok Live" },
+  return: { path: "/scan", displayName: "Scanner Return" },
+  retur: { path: "/scan", displayName: "Scanner Return" },
+  "siap kirim": { path: "/siap-kirim", displayName: "Siap Kirim" },
+  siapkirim: { path: "/siap-kirim", displayName: "Siap Kirim" },
+  kirim: { path: "/siap-kirim", displayName: "Siap Kirim" },
 };
 
 const GREETING_LINES = [

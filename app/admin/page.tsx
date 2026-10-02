@@ -456,6 +456,66 @@ function StoreSelect({
   );
 }
 
+type SaleStage = "belum_siap" | "siap_kirim" | "retur" | "dibatalkan" | "lama";
+
+function saleStage(s: any): SaleStage {
+  if (s.status === "batal") return "retur";
+  if (s.packed_by === "dibatalkan") return "dibatalkan";
+  if (s.packed_by === "sebelum fitur siap kirim") return "lama";
+  return s.packed_at ? "siap_kirim" : "belum_siap";
+}
+
+const STAGE_META: Record<SaleStage, { label: string; cls: string } | null> = {
+  belum_siap: {
+    label: "Belum siap kirim",
+    cls: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  },
+  siap_kirim: {
+    label: "Siap kirim",
+    cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  },
+  retur: {
+    label: "Retur",
+    cls: "bg-red-500/10 text-red-400 border-red-500/20",
+  },
+  dibatalkan: {
+    label: "Dibatalkan",
+    cls: "bg-neutral-500/10 text-neutral-400 border-neutral-500/20",
+  },
+  lama: null, // data sebelum fitur siap kirim: tidak ada status
+};
+
+function StageBadge({
+  stage,
+  soldAt,
+  packedAt,
+}: {
+  stage: SaleStage;
+  soldAt: string;
+  packedAt: string | null;
+}) {
+  const meta = STAGE_META[stage];
+  if (!meta) return null;
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  return (
+    <div className="flex items-center gap-2 mb-2.5 text-[11px]">
+      <span className={`px-2 py-0.5 rounded-full border ${meta.cls}`}>
+        {meta.label}
+      </span>
+      {stage === "siap_kirim" && packedAt && (
+        <span className="text-neutral-500">
+          Dicetak {fmt(soldAt)} · Siap kirim {fmt(packedAt)}
+        </span>
+      )}
+    </div>
+  );
+}
 // Jumlah baris per "halaman" di Catatan Penjualan. MAX mengikuti batas
 // bawaan Supabase (1000 baris per request) -- lebih dari itu akan dipotong
 // diam-diam oleh server, jadi kita berhenti di angka ini dan beri peringatan.
@@ -464,6 +524,9 @@ const SALES_MAX_ROWS = 1000;
 
 function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   const [stores, setStores] = useState<StoreOption[]>([]);
+  const [stageFilter, setStageFilter] = useState<"" | "belum_siap" | "retur">(
+    "",
+  );
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState(shiftDateStr(todayStr(), -7));
   const [dateTo, setDateTo] = useState(todayStr());
@@ -500,7 +563,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
     let query = supabase
       .from("sales")
       .select(
-        "quantity, sold_at, sold_by, resi_number, products(full_name, photo_url), stores!inner(code, name, managed_by)",
+        "quantity, sold_at, sold_by, resi_number, order_number, status, packed_at, packed_by, products(full_name, photo_url), stores!inner(code, name, managed_by)",
         { count: "exact" },
       )
       .eq("stores.managed_by", currentUser)
@@ -510,6 +573,11 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
       .limit(limit);
 
     if (storeFilter) query = query.eq("stores.code", storeFilter);
+    if (stageFilter === "belum_siap") {
+      query = query.is("packed_at", null).or("status.is.null,status.neq.batal");
+    } else if (stageFilter === "retur") {
+      query = query.eq("status", "batal");
+    }
 
     const { data, count, error } = await query;
 
@@ -536,7 +604,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
 
   useEffect(() => {
     loadSalesHistory();
-  }, [dateFrom, dateTo, storeFilter, limit, currentUser]);
+  }, [dateFrom, dateTo, storeFilter, stageFilter, limit, currentUser]);
 
   function copyResi(resi: string) {
     navigator.clipboard.writeText(resi);
@@ -552,6 +620,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
     const q = search.toLowerCase();
     return (
       (s.resi_number ?? "").toLowerCase().includes(q) ||
+      (s.order_number ?? "").toLowerCase().includes(q) ||
       (s.products?.full_name ?? "").toLowerCase().includes(q)
     );
   });
@@ -573,6 +642,8 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
           resi_number: s.resi_number,
           store: s.stores?.code,
           sold_at: s.sold_at,
+          stage: saleStage(s),
+          packed_at: s.packed_at,
           items: [] as any[],
         };
       }
@@ -662,6 +733,23 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
             ))}
           </select>
         </div>
+        <div className="w-44">
+          <label className="text-xs text-neutral-400 mb-1.5 font-medium">
+            Status
+          </label>
+          <select
+            value={stageFilter}
+            onChange={(e) => {
+              setStageFilter(e.target.value as "" | "belum_siap" | "retur");
+              setLimit(SALES_PAGE_SIZE);
+            }}
+            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
+          >
+            <option value="">Semua status</option>
+            <option value="belum_siap">Belum siap kirim</option>
+            <option value="retur">Retur</option>
+          </select>
+        </div>
       </div>
 
       {filteredHistory.length > 0 && (
@@ -723,6 +811,12 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
                 </p>
               </button>
             </div>
+
+            <StageBadge
+              stage={g.stage}
+              soldAt={g.sold_at}
+              packedAt={g.packed_at}
+            />
 
             <div className="space-y-1.5">
               {g.items.map((it: any, i: number) => (
@@ -935,13 +1029,17 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
     let sb = supabase
       .from("sales")
       .select(
-        "id, quantity, awb_number, status_changed_at, products(full_name, photo_url), stores(code, managed_by)",
+        "id, quantity, awb_number, resi_number, order_number, status_changed_at, products(full_name, photo_url), stores(code, managed_by)",
       )
       .eq("status", "batal")
       .order("status_changed_at", { ascending: false });
 
     if (trimmed) {
-      sb = sb.ilike("awb_number", `%${trimmed}%`);
+      // buang karakter yang bisa merusak sintaks .or()
+      const safe = trimmed.replace(/[,()%*]/g, "");
+      sb = sb.or(
+        `awb_number.ilike.%${safe}%,resi_number.ilike.%${safe}%,order_number.ilike.%${safe}%`,
+      );
     } else {
       sb = sb.limit(50);
     }
@@ -971,15 +1069,18 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
 
   const grouped = Object.values(
     filteredRows.reduce((acc: Record<string, any>, r: any) => {
-      const key = r.awb_number;
+      const key = r.awb_number ?? r.resi_number ?? r.order_number ?? r.id;
       if (!acc[key]) {
         acc[key] = {
           key,
-          display_number: r.awb_number,
+          display_number: r.awb_number ?? r.resi_number ?? r.order_number,
+          order_number: r.order_number,
           status_changed_at: r.status_changed_at,
           store: normalizeStore(r.stores),
           items: [] as any[],
         };
+      } else if (!acc[key].order_number && r.order_number) {
+        acc[key].order_number = r.order_number;
       }
       acc[key].items.push({
         product: r.products?.full_name,
@@ -1007,7 +1108,7 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="cth: JY1796616363 atau SPXID..."
+            placeholder="Cari nomor resi / AWB / No. Pesanan"
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
           />
         </div>
@@ -1073,9 +1174,20 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
                       strokeWidth={2}
                       className="text-emerald-400 shrink-0"
                     />
-                    <span className="font-mono text-sm text-neutral-100">
-                      {g.display_number}
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-mono text-sm text-neutral-100">
+                        {g.display_number}
+                      </span>
+                      {g.order_number &&
+                        g.order_number !== g.display_number && (
+                          <span className="text-[11px] text-neutral-500">
+                            No. Pesanan:{" "}
+                            <span className="font-mono text-neutral-400">
+                              {g.order_number}
+                            </span>
+                          </span>
+                        )}
+                    </div>
                   </div>
                   <span className="text-xs text-neutral-500">
                     {g.store?.code ?? "-"} ·{" "}
