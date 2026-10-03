@@ -526,9 +526,39 @@ function StageBadge({
     </div>
   );
 }
-// Jumlah baris per "halaman" di Catatan Penjualan. MAX mengikuti batas
-// bawaan Supabase (1000 baris per request) -- lebih dari itu akan dipotong
-// diam-diam oleh server, jadi kita berhenti di angka ini dan beri peringatan.
+
+// Aturan kolom di tabel sales (sama untuk Shopee & TikTok):
+//   awb_number  = nomor resi (yang ada di barcode label, dipakai scanner)
+//   resi_number = nomor pesanan (No. Pesanan / Order ID)
+// Pengecualian: pesanan Instant tidak punya resi, jadi awb_number kosong.
+
+function CopyChip({
+  label,
+  value,
+  copied,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  copied: boolean;
+  onCopy: (v: string) => void;
+}) {
+  return (
+    <button
+      onClick={() => onCopy(value)}
+      className="text-right group"
+      title={`Klik untuk salin ${label.toLowerCase()}`}
+    >
+      <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
+        {copied ? "Tersalin!" : label}
+      </p>
+      <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
+        {value}
+      </p>
+    </button>
+  );
+}
+
 const SALES_PAGE_SIZE = 200;
 const SALES_MAX_ROWS = 1000;
 
@@ -547,7 +577,11 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const [loading, setLoading] = useState(false);
-  const [copiedResi, setCopiedResi] = useState<string | null>(null);
+  const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
+
+  // Karakter ini merusak sintaks filter .or() di Supabase.
+  const searchTerm = search.trim().replace(/[,()%*]/g, "");
+  const isSearching = searchTerm.length > 0;
 
   async function loadStores() {
     const { data: storeData } = await supabase
@@ -558,14 +592,10 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   }
 
   async function loadSalesHistory() {
-    if (!dateFrom || !dateTo) return;
+    if (!isSearching && (!dateFrom || !dateTo)) return;
     const myRequest = ++requestIdRef.current;
     setLoading(true);
     setErrorMsg(null);
-
-    // Batas hari dihitung dalam WIB (UTC+7), bukan UTC.
-    const start = wibStartISO(dateFrom);
-    const end = wibStartISO(shiftDateStr(dateTo, 1));
 
     // Filter admin & toko dilakukan di database (stores!inner), sebelum
     // limit -- jadi limit hanya menghitung baris milik toko yang dilihat,
@@ -573,18 +603,31 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
     let query = supabase
       .from("sales")
       .select(
-        "quantity, sold_at, sold_by, resi_number, order_number, status, packed_at, packed_by, products(full_name, photo_url), stores!inner(code, name, managed_by)",
+        "quantity, sold_at, sold_by, resi_number, awb_number, status, packed_at, packed_by, products(full_name, photo_url), stores!inner(code, name, managed_by)",
         { count: "exact" },
       )
       .eq("stores.managed_by", currentUser)
-      .gte("sold_at", start)
-      .lt("sold_at", end)
       .order("sold_at", { ascending: false })
       .limit(limit);
 
+    if (isSearching) {
+      // Cari nomor: rentang tanggal diabaikan, karena retur bisa datang
+      // berminggu-minggu setelah resi dicetak.
+      query = query.or(
+        `resi_number.ilike.%${searchTerm}%,awb_number.ilike.%${searchTerm}%`,
+      );
+    } else {
+      // Batas hari dihitung dalam WIB (UTC+7), bukan UTC.
+      query = query
+        .gte("sold_at", wibStartISO(dateFrom))
+        .lt("sold_at", wibStartISO(shiftDateStr(dateTo, 1)));
+    }
+
     if (storeFilter) query = query.eq("stores.code", storeFilter);
     if (stageFilter === "belum_siap") {
-      query = query.is("packed_at", null).or("status.is.null,status.neq.batal");
+      // status selalu terisi (ada default di database), jadi neq aman dipakai
+      // dan tidak perlu .or() kedua yang bisa bentrok dengan filter pencarian.
+      query = query.is("packed_at", null).neq("status", "batal");
     } else if (stageFilter === "retur") {
       query = query.eq("status", "batal");
     }
@@ -612,28 +655,32 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
     loadStores();
   }, []);
 
+  // Jeda 300 ms hanya saat mengetik di kolom cari, supaya tidak query tiap huruf.
   useEffect(() => {
-    loadSalesHistory();
-  }, [dateFrom, dateTo, storeFilter, stageFilter, limit, currentUser]);
+    const t = setTimeout(loadSalesHistory, isSearching ? 300 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    dateFrom,
+    dateTo,
+    storeFilter,
+    stageFilter,
+    limit,
+    currentUser,
+    searchTerm,
+  ]);
 
-  function copyResi(resi: string) {
-    navigator.clipboard.writeText(resi);
-    setCopiedResi(resi);
-    setTimeout(() => setCopiedResi(null), 1500);
+  function copyNumber(value: string) {
+    navigator.clipboard.writeText(value);
+    setCopiedNumber(value);
+    setTimeout(() => setCopiedNumber(null), 1500);
   }
 
   const myStores = stores.filter((s: any) => s.managed_by === currentUser);
 
-  const filteredHistory = salesHistory.filter((s) => {
-    if (storeFilter && s.stores?.code !== storeFilter) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      (s.resi_number ?? "").toLowerCase().includes(q) ||
-      (s.order_number ?? "").toLowerCase().includes(q) ||
-      (s.products?.full_name ?? "").toLowerCase().includes(q)
-    );
-  });
+  const filteredHistory = salesHistory.filter(
+    (s) => !storeFilter || s.stores?.code === storeFilter,
+  );
 
   const totalQty = filteredHistory.reduce((sum, s) => sum + s.quantity, 0);
 
@@ -641,15 +688,23 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
   const isIncomplete = totalRows > salesHistory.length;
   const canLoadMore = isIncomplete && limit < SALES_MAX_ROWS;
 
-  // Satu resi bisa punya beberapa produk berbeda -- digabung jadi satu
-  // kartu berdasarkan resi_number, sama pola-nya kayak Catatan Retur.
+  // Satu pesanan bisa punya beberapa produk berbeda -- digabung jadi satu
+  // kartu berdasarkan resi_number (nomor pesanan), sama pola-nya kayak
+  // Catatan Retur.
   const grouped = Object.values(
     filteredHistory.reduce((acc: Record<string, any>, s: any, idx: number) => {
       const key = s.resi_number || `no-resi-${idx}`;
       if (!acc[key]) {
         acc[key] = {
           key,
-          resi_number: s.resi_number,
+          // Nomor resi (barcode). Kosong untuk pesanan Instant.
+          trackingNo: s.awb_number ?? null,
+          // Nomor pesanan, disembunyikan kalau sama persis dengan nomor resi
+          // (data Shopee lama menyimpan SPXID di kedua kolom).
+          orderNo:
+            s.resi_number && s.resi_number !== s.awb_number
+              ? s.resi_number
+              : null,
           store: s.stores?.code,
           sold_at: s.sold_at,
           stage: saleStage(s),
@@ -673,7 +728,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
         Catatan Penjualan
       </h2>
 
-      {/* Search resi/produk -- elemen paling menonjol, sesuai use case utama */}
+      {/* Search nomor resi / nomor pesanan -- elemen paling menonjol, sesuai use case utama */}
       <div className="relative mb-4">
         <Search
           size={16}
@@ -683,14 +738,27 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Cari nomor resi atau nama produk..."
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setLimit(SALES_PAGE_SIZE);
+          }}
+          placeholder="Cari nomor resi atau nomor pesanan..."
           className="w-full bg-panel border border-line rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
         />
+        {isSearching && (
+          <p className="text-[11px] text-neutral-500 mt-1.5 px-1">
+            Mencari di semua tanggal -- rentang tanggal di bawah diabaikan
+            selama kolom cari terisi.
+          </p>
+        )}
       </div>
 
-      {/* Filter tanggal & toko */}
-      <div className="bg-panel border border-line rounded-xl p-4 mb-4 flex items-end gap-4 flex-wrap">
+      {/* Filter tanggal, toko & status */}
+      <div
+        className={`bg-panel border border-line rounded-xl p-4 mb-4 flex items-end gap-4 flex-wrap transition-opacity ${
+          isSearching ? "opacity-60" : ""
+        }`}
+      >
         <div className="w-36">
           <label className="text-xs text-neutral-400 mb-1.5 font-medium">
             Dari Tanggal
@@ -779,22 +847,24 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
 
       {!loading && !errorMsg && isIncomplete && (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-amber-200">
-          Baru menampilkan {salesHistory.length} dari {totalRows} item di
-          rentang ini, jadi angka di atas belum lengkap.
-          {search && " Pencarian hanya mencakup item yang sudah dimuat."}
+          Baru menampilkan {salesHistory.length} dari {totalRows} item{" "}
+          {isSearching ? "hasil pencarian" : "di rentang ini"}, jadi angka di
+          atas belum lengkap.
           {!canLoadMore &&
-            " Datanya melebihi batas tampilan — persempit rentang tanggal atau pilih satu toko untuk melihat sisanya."}
+            (isSearching
+              ? " Datanya melebihi batas tampilan -- ketik nomor yang lebih lengkap untuk mempersempit."
+              : " Datanya melebihi batas tampilan — persempit rentang tanggal atau pilih satu toko untuk melihat sisanya.")}
         </div>
       )}
 
-      {/* List transaksi -- dikelompokkan per resi */}
+      {/* List transaksi -- dikelompokkan per pesanan */}
       <div className="space-y-2">
         {grouped.map((g: any) => (
           <div
             key={g.key}
             className={`border rounded-xl p-3 hover:border-accent-500/50 transition-colors duration-200 ${STAGE_META[g.stage as SaleStage].card}`}
           >
-            <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-start justify-between mb-2.5 gap-3">
               <div className="flex items-center gap-2 text-xs text-neutral-500">
                 <span>{g.store}</span>
                 <span>·</span>
@@ -808,18 +878,27 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
                 </span>
               </div>
 
-              <button
-                onClick={() => g.resi_number && copyResi(g.resi_number)}
-                className="shrink-0 text-right group"
-                title="Klik untuk salin nomor resi"
-              >
-                <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
-                  {copiedResi === g.resi_number ? "Tersalin!" : "No. Resi"}
-                </p>
-                <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
-                  {g.resi_number ?? "-"}
-                </p>
-              </button>
+              <div className="shrink-0 flex flex-col items-end gap-1.5">
+                {g.trackingNo && (
+                  <CopyChip
+                    label="No. Resi"
+                    value={g.trackingNo}
+                    copied={copiedNumber === g.trackingNo}
+                    onCopy={copyNumber}
+                  />
+                )}
+                {g.orderNo && (
+                  <CopyChip
+                    label="No. Pesanan"
+                    value={g.orderNo}
+                    copied={copiedNumber === g.orderNo}
+                    onCopy={copyNumber}
+                  />
+                )}
+                {!g.trackingNo && !g.orderNo && (
+                  <span className="text-xs text-neutral-500">-</span>
+                )}
+              </div>
             </div>
 
             <StageBadge
@@ -861,8 +940,8 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
 
         {!loading && filteredHistory.length === 0 && (
           <p className="text-neutral-500 text-sm text-center py-10">
-            {search
-              ? "Tidak ada transaksi yang cocok dengan pencarian"
+            {isSearching
+              ? "Tidak ada transaksi dengan nomor tersebut"
               : "Belum ada penjualan di rentang tanggal ini"}
           </p>
         )}
@@ -1036,29 +1115,29 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
     setLoading(true);
     setSearched(trimmed.length > 0);
 
+    // stores!inner + filter managed_by dilakukan di database (sama seperti
+    // Catatan Penjualan), supaya limit tidak habis oleh retur toko admin lain.
     let sb = supabase
       .from("sales")
       .select(
-        "id, quantity, awb_number, resi_number, order_number, status_changed_at, products(full_name, photo_url), stores(code, managed_by)",
+        "id, quantity, awb_number, resi_number, status_changed_at, products(full_name, photo_url), stores!inner(code, managed_by)",
       )
       .eq("status", "batal")
+      .eq("stores.managed_by", currentUser)
       .order("status_changed_at", { ascending: false });
 
     if (trimmed) {
       // buang karakter yang bisa merusak sintaks .or()
       const safe = trimmed.replace(/[,()%*]/g, "");
-      sb = sb.or(
-        `awb_number.ilike.%${safe}%,resi_number.ilike.%${safe}%,order_number.ilike.%${safe}%`,
-      );
+      sb = sb
+        .or(`awb_number.ilike.%${safe}%,resi_number.ilike.%${safe}%`)
+        .limit(100);
     } else {
       sb = sb.limit(50);
     }
 
     const { data } = await sb;
-    const scoped = (data ?? []).filter(
-      (r: any) => normalizeStore(r.stores)?.managed_by === currentUser,
-    );
-    setRows(scoped);
+    setRows(data ?? []);
     setLoading(false);
   }
 
@@ -1077,20 +1156,22 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
     ? rows.filter((r: any) => normalizeStore(r.stores)?.code === storeFilter)
     : rows;
 
+  // awb_number = nomor resi, resi_number = nomor pesanan.
+  // Pesanan Instant tidak punya resi, jadi nomor pesanan jadi nomor utama.
   const grouped = Object.values(
     filteredRows.reduce((acc: Record<string, any>, r: any) => {
-      const key = r.awb_number ?? r.resi_number ?? r.order_number ?? r.id;
+      const key = r.awb_number ?? r.resi_number ?? r.id;
       if (!acc[key]) {
+        const display = r.awb_number ?? r.resi_number;
         acc[key] = {
           key,
-          display_number: r.awb_number ?? r.resi_number ?? r.order_number,
-          order_number: r.order_number,
+          display_number: display,
+          order_no:
+            r.resi_number && r.resi_number !== display ? r.resi_number : null,
           status_changed_at: r.status_changed_at,
           store: normalizeStore(r.stores),
           items: [] as any[],
         };
-      } else if (!acc[key].order_number && r.order_number) {
-        acc[key].order_number = r.order_number;
       }
       acc[key].items.push({
         product: r.products?.full_name,
@@ -1112,13 +1193,13 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
         <div className="min-w-[220px] flex-1">
           <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
             <Search size={13} strokeWidth={1.75} className="text-neutral-500" />
-            Cari nomor resi / AWB
+            Cari nomor resi / No. Pesanan
           </label>
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari nomor resi / AWB / No. Pesanan"
+            placeholder="cth: JY1796616363, SPXID... atau 261002JF8WX0P9"
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
           />
         </div>
@@ -1150,7 +1231,7 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
       {!loading && searched && grouped.length === 0 && (
         <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl p-5 text-sm flex items-center gap-2.5">
           <AlertTriangle size={16} strokeWidth={2} className="shrink-0" />
-          Resi &quot;{query}&quot; belum tercatat balik -- belum discan, atau
+          Nomor &quot;{query}&quot; belum tercatat balik -- belum discan, atau
           coba cek lagi apakah hilang di jalan.
         </div>
       )}
@@ -1188,15 +1269,14 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
                       <span className="font-mono text-sm text-neutral-100">
                         {g.display_number}
                       </span>
-                      {g.order_number &&
-                        g.order_number !== g.display_number && (
-                          <span className="text-[11px] text-neutral-500">
-                            No. Pesanan:{" "}
-                            <span className="font-mono text-neutral-400">
-                              {g.order_number}
-                            </span>
+                      {g.order_no && (
+                        <span className="text-[11px] text-neutral-500">
+                          No. Pesanan:{" "}
+                          <span className="font-mono text-neutral-400">
+                            {g.order_no}
                           </span>
-                        )}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <span className="text-xs text-neutral-500">

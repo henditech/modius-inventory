@@ -98,7 +98,7 @@ export default function SiapKirimPage() {
     const { data } = await supabase
       .from("sales")
       .select(
-        "id, awb_number, resi_number, order_number, sold_at, quantity, products(full_name), stores(code)",
+        "id, awb_number, resi_number, sold_at, quantity, products(full_name), stores(code)",
       )
       .is("packed_at", null)
       .or("status.is.null,status.neq.batal")
@@ -106,13 +106,12 @@ export default function SiapKirimPage() {
 
     const map = new Map<string, PendingGroup>();
     for (const r of (data ?? []) as any[]) {
-      const key =
-        r.awb_number ?? r.resi_number ?? r.order_number ?? String(r.id);
+      const key = r.awb_number ?? r.resi_number ?? String(r.id);
       let g = map.get(key);
       if (!g) {
         g = {
           key,
-          orderNumber: r.order_number ?? null,
+          orderNumber: r.resi_number ?? null,
           store: normalizeStore(r.stores)?.code ?? "-",
           soldAt: r.sold_at,
           ids: [],
@@ -193,9 +192,7 @@ export default function SiapKirimPage() {
         .select(
           "id, quantity, status, packed_at, products(full_name), stores(code)",
         )
-        .or(
-          `awb_number.eq.${safe},resi_number.eq.${safe},order_number.eq.${safe}`,
-        );
+        .or(`awb_number.eq.${safe},resi_number.eq.${safe}`);
 
       if (!rows || rows.length === 0) {
         beepProblem();
