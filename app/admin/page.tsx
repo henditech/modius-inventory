@@ -465,24 +465,35 @@ function saleStage(s: any): SaleStage {
   return s.packed_at ? "siap_kirim" : "belum_siap";
 }
 
-const STAGE_META: Record<SaleStage, { label: string; cls: string } | null> = {
+const STAGE_META: Record<
+  SaleStage,
+  { label: string; badge: string; card: string }
+> = {
   belum_siap: {
-    label: "Belum siap kirim",
-    cls: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    label: "Dicetak",
+    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    card: "border-amber-500/30 bg-amber-500/5",
   },
   siap_kirim: {
-    label: "Siap kirim",
-    cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    label: "Dikirim",
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    card: "border-emerald-500/20 bg-emerald-500/5",
+  },
+  lama: {
+    label: "Dikirim",
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    card: "border-emerald-500/20 bg-emerald-500/5",
   },
   retur: {
     label: "Retur",
-    cls: "bg-red-500/10 text-red-400 border-red-500/20",
+    badge: "bg-red-500/10 text-red-400 border-red-500/20",
+    card: "border-red-500/30 bg-red-500/5",
   },
   dibatalkan: {
     label: "Dibatalkan",
-    cls: "bg-neutral-500/10 text-neutral-400 border-neutral-500/20",
+    badge: "bg-neutral-500/10 text-neutral-400 border-neutral-500/20",
+    card: "border-line bg-panel",
   },
-  lama: null, // data sebelum fitur siap kirim: tidak ada status
 };
 
 function StageBadge({
@@ -495,7 +506,6 @@ function StageBadge({
   packedAt: string | null;
 }) {
   const meta = STAGE_META[stage];
-  if (!meta) return null;
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString("id-ID", {
       day: "2-digit",
@@ -505,12 +515,12 @@ function StageBadge({
     });
   return (
     <div className="flex items-center gap-2 mb-2.5 text-[11px]">
-      <span className={`px-2 py-0.5 rounded-full border ${meta.cls}`}>
+      <span className={`px-2 py-0.5 rounded-full border ${meta.badge}`}>
         {meta.label}
       </span>
       {stage === "siap_kirim" && packedAt && (
         <span className="text-neutral-500">
-          Dicetak {fmt(soldAt)} · Siap kirim {fmt(packedAt)}
+          Dicetak {fmt(soldAt)} · Dikirim {fmt(packedAt)}
         </span>
       )}
     </div>
@@ -746,7 +756,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
             className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
           >
             <option value="">Semua status</option>
-            <option value="belum_siap">Belum siap kirim</option>
+            <option value="belum_siap">Dicetak</option>
             <option value="retur">Retur</option>
           </select>
         </div>
@@ -782,7 +792,7 @@ function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
         {grouped.map((g: any) => (
           <div
             key={g.key}
-            className="bg-panel border border-line rounded-xl p-3 hover:border-accent-500/50 transition-colors duration-200"
+            className={`border rounded-xl p-3 hover:border-accent-500/50 transition-colors duration-200 ${STAGE_META[g.stage as SaleStage].card}`}
           >
             <div className="flex items-center justify-between mb-2.5">
               <div className="flex items-center gap-2 text-xs text-neutral-500">
