@@ -35,7 +35,8 @@ const ROUTES: Record<
   },
 
   stok: { path: "/stok-live", displayName: "Stok Live" },
-  host: { path: "/stok-live", displayName: "Stok Live" },
+  stock: { path: "/stok-live", displayName: "Stok Live" },
+  host: { path: "/host", displayName: "Host" },
   return: { path: "/scan", displayName: "Scanner Return" },
   retur: { path: "/scan", displayName: "Scanner Return" },
   "siap kirim": { path: "/siap-kirim", displayName: "Siap Kirim" },

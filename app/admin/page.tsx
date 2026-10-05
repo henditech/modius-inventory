@@ -3,6 +3,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import ObrolanSection from "../components/ObrolanSection";
 import {
+  DialogProvider,
+  useConfirm,
+  usePrompt,
+  type ConfirmOptions,
+} from "../components/ConfirmDialog";
+import AdminThemeStyles from "../components/AdminTheme";
+import CatatanPenjualanSection, {
+  type StoreOption,
+} from "../components/CatatanPenjualanSection";
+import {
   LayoutDashboard,
   Boxes,
   Plus,
@@ -27,6 +37,7 @@ import {
   Loader2,
   Search,
   MessageCircle,
+  PackageCheck,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -45,6 +56,7 @@ import {
   Bar,
 } from "recharts";
 import { supabase } from "@/lib/supabase";
+import { shiftDateStr, todayStr, wibStartISO } from "@/lib/dates";
 
 type Section =
   | "overview"
@@ -343,33 +355,6 @@ type ProductOption = {
   photo_url: string | null;
   stock_qty: number;
 };
-type StoreOption = {
-  id: string;
-  name: string;
-  code: string;
-  managed_by: string;
-};
-
-// Tanggal "hari ini" menurut WIB, bukan UTC -- supaya jam 00.00-07.00 pagi
-// tidak masih terbaca sebagai kemarin.
-function todayStr() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-}
-
-// Geser tanggal (format YYYY-MM-DD) murni hitungan kalender, tidak
-// terpengaruh zona waktu browser.
-function shiftDateStr(dateStr: string, deltaDays: number) {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + deltaDays);
-  return d.toISOString().split("T")[0];
-}
-
-// Awal hari (00.00 WIB) dari tanggal YYYY-MM-DD, dalam format ISO/UTC
-// yang dipakai untuk membandingkan kolom timestamp di Supabase.
-function wibStartISO(dateStr: string) {
-  return new Date(`${dateStr}T00:00:00+07:00`).toISOString();
-}
-
 function shortLabel(isoStr: string) {
   const d = new Date(`${isoStr}T00:00:00`);
   return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
@@ -451,518 +436,6 @@ function StoreSelect({
             </button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-type SaleStage = "belum_siap" | "siap_kirim" | "retur" | "dibatalkan" | "lama";
-
-function saleStage(s: any): SaleStage {
-  if (s.status === "batal") return "retur";
-  if (s.packed_by === "dibatalkan") return "dibatalkan";
-  if (s.packed_by === "sebelum fitur siap kirim") return "lama";
-  return s.packed_at ? "siap_kirim" : "belum_siap";
-}
-
-const STAGE_META: Record<
-  SaleStage,
-  { label: string; badge: string; card: string }
-> = {
-  belum_siap: {
-    label: "Dicetak",
-    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    card: "border-amber-500/30 bg-amber-500/5",
-  },
-  siap_kirim: {
-    label: "Dikirim",
-    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-    card: "border-emerald-500/20 bg-emerald-500/5",
-  },
-  lama: {
-    label: "Dikirim",
-    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-    card: "border-emerald-500/20 bg-emerald-500/5",
-  },
-  retur: {
-    label: "Retur",
-    badge: "bg-red-500/10 text-red-400 border-red-500/20",
-    card: "border-red-500/30 bg-red-500/5",
-  },
-  dibatalkan: {
-    label: "Dibatalkan",
-    badge: "bg-neutral-500/10 text-neutral-400 border-neutral-500/20",
-    card: "border-line bg-panel",
-  },
-};
-
-function StageBadge({
-  stage,
-  soldAt,
-  packedAt,
-}: {
-  stage: SaleStage;
-  soldAt: string;
-  packedAt: string | null;
-}) {
-  const meta = STAGE_META[stage];
-  const fmt = (iso: string) =>
-    new Date(iso).toLocaleString("id-ID", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  return (
-    <div className="flex items-center gap-2 mb-2.5 text-[11px]">
-      <span className={`px-2 py-0.5 rounded-full border ${meta.badge}`}>
-        {meta.label}
-      </span>
-      {stage === "siap_kirim" && packedAt && (
-        <span className="text-neutral-500">
-          Dicetak {fmt(soldAt)} · Dikirim {fmt(packedAt)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// Aturan kolom di tabel sales (sama untuk Shopee & TikTok):
-//   awb_number  = nomor resi (yang ada di barcode label, dipakai scanner)
-//   resi_number = nomor pesanan (No. Pesanan / Order ID)
-// Pengecualian: pesanan Instant tidak punya resi, jadi awb_number kosong.
-
-function CopyChip({
-  label,
-  value,
-  copied,
-  onCopy,
-}: {
-  label: string;
-  value: string;
-  copied: boolean;
-  onCopy: (v: string) => void;
-}) {
-  return (
-    <button
-      onClick={() => onCopy(value)}
-      className="text-right group"
-      title={`Klik untuk salin ${label.toLowerCase()}`}
-    >
-      <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
-        {copied ? "Tersalin!" : label}
-      </p>
-      <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
-        {value}
-      </p>
-    </button>
-  );
-}
-
-const SALES_PAGE_SIZE = 200;
-const SALES_MAX_ROWS = 1000;
-
-function CatatanPenjualanSection({ currentUser }: { currentUser: string }) {
-  const [stores, setStores] = useState<StoreOption[]>([]);
-  const [stageFilter, setStageFilter] = useState<"" | "belum_siap" | "retur">(
-    "",
-  );
-  const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState(shiftDateStr(todayStr(), -7));
-  const [dateTo, setDateTo] = useState(todayStr());
-  const [storeFilter, setStoreFilter] = useState("");
-  const [salesHistory, setSalesHistory] = useState<any[]>([]);
-  const [limit, setLimit] = useState(SALES_PAGE_SIZE);
-  const [totalRows, setTotalRows] = useState(0);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const requestIdRef = useRef(0);
-  const [loading, setLoading] = useState(false);
-  const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
-
-  // Karakter ini merusak sintaks filter .or() di Supabase.
-  const searchTerm = search.trim().replace(/[,()%*]/g, "");
-  const isSearching = searchTerm.length > 0;
-
-  async function loadStores() {
-    const { data: storeData } = await supabase
-      .from("stores")
-      .select("id, name, code, managed_by")
-      .order("code");
-    if (storeData) setStores(storeData);
-  }
-
-  async function loadSalesHistory() {
-    if (!isSearching && (!dateFrom || !dateTo)) return;
-    const myRequest = ++requestIdRef.current;
-    setLoading(true);
-    setErrorMsg(null);
-
-    // Filter admin & toko dilakukan di database (stores!inner), sebelum
-    // limit -- jadi limit hanya menghitung baris milik toko yang dilihat,
-    // bukan berebut jatah dengan toko admin lain.
-    let query = supabase
-      .from("sales")
-      .select(
-        "quantity, sold_at, sold_by, resi_number, awb_number, status, packed_at, packed_by, products(full_name, photo_url), stores!inner(code, name, managed_by)",
-        { count: "exact" },
-      )
-      .eq("stores.managed_by", currentUser)
-      .order("sold_at", { ascending: false })
-      .limit(limit);
-
-    if (isSearching) {
-      // Cari nomor: rentang tanggal diabaikan, karena retur bisa datang
-      // berminggu-minggu setelah resi dicetak.
-      query = query.or(
-        `resi_number.ilike.%${searchTerm}%,awb_number.ilike.%${searchTerm}%`,
-      );
-    } else {
-      // Batas hari dihitung dalam WIB (UTC+7), bukan UTC.
-      query = query
-        .gte("sold_at", wibStartISO(dateFrom))
-        .lt("sold_at", wibStartISO(shiftDateStr(dateTo, 1)));
-    }
-
-    if (storeFilter) query = query.eq("stores.code", storeFilter);
-    if (stageFilter === "belum_siap") {
-      // status selalu terisi (ada default di database), jadi neq aman dipakai
-      // dan tidak perlu .or() kedua yang bisa bentrok dengan filter pencarian.
-      query = query.is("packed_at", null).neq("status", "batal");
-    } else if (stageFilter === "retur") {
-      query = query.eq("status", "batal");
-    }
-
-    const { data, count, error } = await query;
-
-    // Abaikan hasil kalau sudah ada permintaan yang lebih baru
-    // (misalnya ganti tanggal cepat-cepat).
-    if (myRequest !== requestIdRef.current) return;
-
-    if (error) {
-      setErrorMsg(error.message);
-      setSalesHistory([]);
-      setTotalRows(0);
-      setLoading(false);
-      return;
-    }
-
-    setSalesHistory(data ?? []);
-    setTotalRows(count ?? data?.length ?? 0);
-    setLoading(false);
-  }
-
-  useEffect(() => {
-    loadStores();
-  }, []);
-
-  // Jeda 300 ms hanya saat mengetik di kolom cari, supaya tidak query tiap huruf.
-  useEffect(() => {
-    const t = setTimeout(loadSalesHistory, isSearching ? 300 : 0);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    dateFrom,
-    dateTo,
-    storeFilter,
-    stageFilter,
-    limit,
-    currentUser,
-    searchTerm,
-  ]);
-
-  function copyNumber(value: string) {
-    navigator.clipboard.writeText(value);
-    setCopiedNumber(value);
-    setTimeout(() => setCopiedNumber(null), 1500);
-  }
-
-  const myStores = stores.filter((s: any) => s.managed_by === currentUser);
-
-  const filteredHistory = salesHistory.filter(
-    (s) => !storeFilter || s.stores?.code === storeFilter,
-  );
-
-  const totalQty = filteredHistory.reduce((sum, s) => sum + s.quantity, 0);
-
-  // Data di database bisa lebih banyak dari yang sudah dimuat.
-  const isIncomplete = totalRows > salesHistory.length;
-  const canLoadMore = isIncomplete && limit < SALES_MAX_ROWS;
-
-  // Satu pesanan bisa punya beberapa produk berbeda -- digabung jadi satu
-  // kartu berdasarkan resi_number (nomor pesanan), sama pola-nya kayak
-  // Catatan Retur.
-  const grouped = Object.values(
-    filteredHistory.reduce((acc: Record<string, any>, s: any, idx: number) => {
-      const key = s.resi_number || `no-resi-${idx}`;
-      if (!acc[key]) {
-        acc[key] = {
-          key,
-          // Nomor resi (barcode). Kosong untuk pesanan Instant.
-          trackingNo: s.awb_number ?? null,
-          // Nomor pesanan, disembunyikan kalau sama persis dengan nomor resi
-          // (data Shopee lama menyimpan SPXID di kedua kolom).
-          orderNo:
-            s.resi_number && s.resi_number !== s.awb_number
-              ? s.resi_number
-              : null,
-          store: s.stores?.code,
-          sold_at: s.sold_at,
-          stage: saleStage(s),
-          packed_at: s.packed_at,
-          items: [] as any[],
-        };
-      }
-      acc[key].items.push({
-        product: s.products?.full_name ?? "(produk tidak ditemukan)",
-        photo: s.products?.photo_url,
-        qty: s.quantity,
-      });
-      return acc;
-    }, {}),
-  );
-
-  return (
-    <div className="animate-fadeIn">
-      <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
-        <span className="w-2 h-2 rounded-full bg-accent-400"></span>
-        Catatan Penjualan
-      </h2>
-
-      {/* Search nomor resi / nomor pesanan -- elemen paling menonjol, sesuai use case utama */}
-      <div className="relative mb-4">
-        <Search
-          size={16}
-          strokeWidth={1.75}
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500"
-        />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setLimit(SALES_PAGE_SIZE);
-          }}
-          placeholder="Cari nomor resi atau nomor pesanan..."
-          className="w-full bg-panel border border-line rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-        />
-        {isSearching && (
-          <p className="text-[11px] text-neutral-500 mt-1.5 px-1">
-            Mencari di semua tanggal -- rentang tanggal di bawah diabaikan
-            selama kolom cari terisi.
-          </p>
-        )}
-      </div>
-
-      {/* Filter tanggal, toko & status */}
-      <div
-        className={`bg-panel border border-line rounded-xl p-4 mb-4 flex items-end gap-4 flex-wrap transition-opacity ${
-          isSearching ? "opacity-60" : ""
-        }`}
-      >
-        <div className="w-36">
-          <label className="text-xs text-neutral-400 mb-1.5 font-medium">
-            Dari Tanggal
-          </label>
-          <input
-            type="date"
-            value={dateFrom}
-            max={dateTo}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setLimit(SALES_PAGE_SIZE);
-            }}
-            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70"
-          />
-        </div>
-        <div className="w-36">
-          <label className="text-xs text-neutral-400 mb-1.5 font-medium">
-            Sampai Tanggal
-          </label>
-          <input
-            type="date"
-            value={dateTo}
-            min={dateFrom}
-            max={todayStr()}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setLimit(SALES_PAGE_SIZE);
-            }}
-            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:opacity-70"
-          />
-        </div>
-        <div className="min-w-[200px] flex-1">
-          <label className="text-xs text-neutral-400 mb-1.5 font-medium flex items-center gap-1.5">
-            <Store size={13} strokeWidth={1.75} className="text-neutral-500" />
-            Toko
-          </label>
-          <select
-            value={storeFilter}
-            onChange={(e) => {
-              setStoreFilter(e.target.value);
-              setLimit(SALES_PAGE_SIZE);
-            }}
-            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-          >
-            <option value="">Semua Toko Saya</option>
-            {myStores.map((s: any) => (
-              <option key={s.id} value={s.code}>
-                {s.code} — {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="w-44">
-          <label className="text-xs text-neutral-400 mb-1.5 font-medium">
-            Status
-          </label>
-          <select
-            value={stageFilter}
-            onChange={(e) => {
-              setStageFilter(e.target.value as "" | "belum_siap" | "retur");
-              setLimit(SALES_PAGE_SIZE);
-            }}
-            className="w-full bg-black/40 border border-line rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/50 transition-all"
-          >
-            <option value="">Semua status</option>
-            <option value="belum_siap">Dicetak</option>
-            <option value="retur">Retur</option>
-          </select>
-        </div>
-      </div>
-
-      {filteredHistory.length > 0 && (
-        <div className="bg-accent-500/10 border border-accent-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-neutral-300">
-          <span className="text-accent-400 font-semibold tabular-nums">
-            {totalQty} pcs
-          </span>{" "}
-          dari {grouped.length} resi
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-red-300">
-          Data gagal dimuat: {errorMsg}
-        </div>
-      )}
-
-      {!loading && !errorMsg && isIncomplete && (
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2.5 mb-4 text-sm text-amber-200">
-          Baru menampilkan {salesHistory.length} dari {totalRows} item{" "}
-          {isSearching ? "hasil pencarian" : "di rentang ini"}, jadi angka di
-          atas belum lengkap.
-          {!canLoadMore &&
-            (isSearching
-              ? " Datanya melebihi batas tampilan -- ketik nomor yang lebih lengkap untuk mempersempit."
-              : " Datanya melebihi batas tampilan — persempit rentang tanggal atau pilih satu toko untuk melihat sisanya.")}
-        </div>
-      )}
-
-      {/* List transaksi -- dikelompokkan per pesanan */}
-      <div className="space-y-2">
-        {grouped.map((g: any) => (
-          <div
-            key={g.key}
-            className={`border rounded-xl p-3 hover:border-accent-500/50 transition-colors duration-200 ${STAGE_META[g.stage as SaleStage].card}`}
-          >
-            <div className="flex items-start justify-between mb-2.5 gap-3">
-              <div className="flex items-center gap-2 text-xs text-neutral-500">
-                <span>{g.store}</span>
-                <span>·</span>
-                <span>
-                  {new Date(g.sold_at).toLocaleString("id-ID", {
-                    day: "2-digit",
-                    month: "2-digit",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-
-              <div className="shrink-0 flex flex-col items-end gap-1.5">
-                {g.trackingNo && (
-                  <CopyChip
-                    label="No. Resi"
-                    value={g.trackingNo}
-                    copied={copiedNumber === g.trackingNo}
-                    onCopy={copyNumber}
-                  />
-                )}
-                {g.orderNo && (
-                  <CopyChip
-                    label="No. Pesanan"
-                    value={g.orderNo}
-                    copied={copiedNumber === g.orderNo}
-                    onCopy={copyNumber}
-                  />
-                )}
-                {!g.trackingNo && !g.orderNo && (
-                  <span className="text-xs text-neutral-500">-</span>
-                )}
-              </div>
-            </div>
-
-            <StageBadge
-              stage={g.stage}
-              soldAt={g.sold_at}
-              packedAt={g.packed_at}
-            />
-
-            <div className="space-y-1.5">
-              {g.items.map((it: any, i: number) => (
-                <div key={i} className="flex items-center gap-3">
-                  {it.photo ? (
-                    <img
-                      src={it.photo}
-                      alt={it.product}
-                      loading="lazy"
-                      className="w-24 aspect-video rounded-lg object-cover shrink-0"
-                    />
-                  ) : (
-                    <div className="w-24 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
-                      <Package
-                        size={18}
-                        strokeWidth={1.5}
-                        className="text-neutral-600"
-                      />
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-neutral-100 truncate">
-                      {it.product}
-                    </p>
-                    <p className="text-xs text-neutral-500">{it.qty} pcs</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-
-        {!loading && filteredHistory.length === 0 && (
-          <p className="text-neutral-500 text-sm text-center py-10">
-            {isSearching
-              ? "Tidak ada transaksi dengan nomor tersebut"
-              : "Belum ada penjualan di rentang tanggal ini"}
-          </p>
-        )}
-
-        {loading && (
-          <p className="text-neutral-500 text-sm text-center py-10 flex items-center justify-center gap-2">
-            <Loader2 size={14} className="animate-spin" />
-            Memuat...
-          </p>
-        )}
-      </div>
-
-      {!loading && canLoadMore && (
-        <button
-          onClick={() =>
-            setLimit((l) => Math.min(l + SALES_PAGE_SIZE, SALES_MAX_ROWS))
-          }
-          className="w-full mt-4 py-2.5 rounded-lg border border-line text-sm text-neutral-400 hover:text-neutral-200 hover:border-neutral-500 transition-colors"
-        >
-          Muat lebih banyak
-        </button>
       )}
     </div>
   );
@@ -1951,6 +1424,7 @@ type PinLogo = { id: string; name: string; available_qty: number };
 function KelolaStokSection({ currentUser }: { currentUser: string }) {
   const [tab, setTab] = useState<"topi" | "pelengkap">("topi");
   const [message, setMessage] = useState<FlashMessage | null>(null);
+  const askPrompt = usePrompt();
 
   function flash(text: string, type: FlashType = "success") {
     setMessage({ text, type });
@@ -2061,14 +1535,21 @@ function KelolaStokSection({ currentUser }: { currentUser: string }) {
   async function handleReduceStock(row: StockRow) {
     const qty = qtyInputs[row.id] || 0;
     if (qty <= 0) return;
-    const reason =
-      window.prompt(`Alasan mengurangi ${row.full_name}?`, "") || null;
+    const reason = await askPrompt({
+      title: `Kurangi stok ${row.full_name}?`,
+      message: `Stok akan dikurangi ${qty}.`,
+      inputLabel: "Alasan (opsional)",
+      placeholder: "Contoh: rusak, hilang, koreksi hitungan",
+      confirmLabel: "Kurangi stok",
+      tone: "warning",
+    });
+    if (reason === null) return; // user menekan Batal
 
     await supabase.from("stock_adjustments").insert({
       product_id: row.id,
       quantity: qty,
       direction: "kurang",
-      reason,
+      reason: reason || null,
       adjusted_by: currentUser,
     });
 
@@ -3475,7 +2956,7 @@ function MappingsSection() {
   );
 }
 
-export default function AdminPage() {
+function AdminPageContent() {
   const [activeSection, setActiveSection] = useState<Section>("overview");
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
@@ -3556,103 +3037,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-base text-neutral-100 font-[family-name:var(--font-inter)]">
       {/* Custom Styles: token warna, animasi masuk, dan efek kilau */}
-      <style jsx global>{`
-        :root {
-          --bg-base: #0a0b0e;
-          --bg-panel: #111318;
-          --border-line: #23262e;
-          --accent-400: #7c96ff;
-          --accent-500: #5b7fff;
-        }
-        .bg-base {
-          background-color: var(--bg-base);
-        }
-        .bg-panel {
-          background-color: var(--bg-panel);
-        }
-        .border-line {
-          border-color: var(--border-line);
-        }
-        .bg-accent-500 {
-          background-color: var(--accent-500);
-        }
-        .hover\\:bg-accent-400:hover {
-          background-color: var(--accent-400);
-        }
-        .text-accent-400 {
-          color: var(--accent-400);
-        }
-        .bg-accent-400 {
-          background-color: var(--accent-400);
-        }
-        .border-accent-500\\/50:hover,
-        .hover\\:border-accent-500\\/50:hover {
-          border-color: rgba(91, 127, 255, 0.5);
-        }
-        .focus\\:border-accent-500:focus {
-          border-color: var(--accent-500);
-        }
-        .focus\\:ring-accent-500\\/50:focus {
-          --tw-ring-color: rgba(91, 127, 255, 0.5);
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(8px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.3s ease-out forwards;
-        }
-
-        /* Efek kilau 3D: sapuan cahaya diagonal saat hover */
-        .shine-surface,
-        .shine-btn {
-          position: relative;
-          overflow: hidden;
-          isolation: isolate;
-        }
-        .shine-surface::after,
-        .shine-btn::after {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: -60%;
-          width: 40%;
-          height: 100%;
-          background: linear-gradient(
-            115deg,
-            transparent 20%,
-            rgba(255, 255, 255, 0.06) 45%,
-            rgba(255, 255, 255, 0.14) 50%,
-            rgba(255, 255, 255, 0.06) 55%,
-            transparent 80%
-          );
-          transform: skewX(-20deg);
-          transition: left 0.85s cubic-bezier(0.19, 1, 0.22, 1);
-          pointer-events: none;
-          z-index: 1;
-        }
-        .shine-surface:hover::after,
-        .shine-btn:hover::after {
-          left: 130%;
-        }
-        .shine-btn::after {
-          background: linear-gradient(
-            115deg,
-            transparent 20%,
-            rgba(255, 255, 255, 0.1) 45%,
-            rgba(255, 255, 255, 0.28) 50%,
-            rgba(255, 255, 255, 0.1) 55%,
-            transparent 80%
-          );
-        }
-      `}</style>
+      <AdminThemeStyles />
 
       {/* Header */}
       <div className="bg-panel/80 backdrop-blur-sm border-b border-line px-4 md:px-8 py-4 flex items-center justify-between sticky top-0 z-30">
@@ -3789,5 +3174,13 @@ export default function AdminPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <DialogProvider>
+      <AdminPageContent />
+    </DialogProvider>
   );
 }
