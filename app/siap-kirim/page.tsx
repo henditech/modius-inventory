@@ -140,6 +140,7 @@ export default function SiapKirimPage() {
           Html5QrcodeSupportedFormats.CODE_128,
           Html5QrcodeSupportedFormats.QR_CODE,
         ],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
         verbose: false,
       });
       scannerInstanceRef.current = html5Qrcode;
@@ -147,10 +148,29 @@ export default function SiapKirimPage() {
       try {
         await html5Qrcode.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 300, height: 150 } },
+          {
+            fps: 15,
+            qrbox: (w: number, h: number) => ({
+              width: Math.floor(w * 0.9),
+              height: Math.floor(h * 0.4),
+            }),
+            videoConstraints: {
+              facingMode: "environment",
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              advanced: [{ focusMode: "continuous" }],
+            } as any,
+          },
           handleDecoded,
           () => {},
         );
+
+        try {
+          const zoom = html5Qrcode
+            .getRunningTrackCameraCapabilities()
+            .zoomFeature();
+          if (zoom.isSupported()) zoom.apply(Math.min(2, zoom.max()));
+        } catch {}
       } catch {
         setCameraError(
           "Tidak bisa mengakses kamera. Pastikan izin kamera diaktifkan untuk halaman ini.",

@@ -67,7 +67,7 @@ export default function HostPage() {
             Host Live
           </h1>
           <p className="text-sm text-neutral-500 mb-5">
-            Stok dan status pesanan, hanya untuk dilihat.
+            Pantau stok dan status pesanan.
             {updatedAt &&
               isStockTab &&
               ` Stok diperbarui ${formatTime(updatedAt)}.`}
