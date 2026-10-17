@@ -811,6 +811,7 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
   >([]);
   const [overviewDate, setOverviewDate] = useState(todayStr());
   const [salesLast7, setSalesLast7] = useState(0);
+  const [overviewIncomplete, setOverviewIncomplete] = useState(false);
   const [loadingTrend, setLoadingTrend] = useState(false);
   const [storeHealth, setStoreHealth] = useState<
     {
@@ -889,24 +890,33 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     end.setDate(end.getDate() + 1);
     end.setHours(0, 0, 0, 0);
 
-    const { data: rawSalesData } = await supabase
+    // Filter admin dilakukan DI DATABASE lewat stores!inner -- bukan
+    // diambil semua toko lalu disaring di browser. Supabase membatasi
+    // 1000 baris per request; kalau toko lain sedang ramai, baris
+    // tokomu di hari-hari terbaru bisa kepotong sebelum sempat disaring.
+    const { data: rawSalesData, count: salesCount } = await supabase
       .from("sales")
       .select(
-        "quantity, sold_at, store_id, products(id, full_name, photo_url), stores(name, code, managed_by)",
+        "quantity, sold_at, store_id, products(id, full_name, photo_url), stores!inner(name, code, managed_by)",
+        { count: "exact" },
       )
+      .eq("stores.managed_by", currentUser)
       .gte("sold_at", start.toISOString())
-      .lt("sold_at", end.toISOString());
+      .lt("sold_at", end.toISOString())
+      .order("sold_at", { ascending: false })
+      .limit(1000);
 
-    const { data: rawReturnsData } = await supabase
+    const { data: returnsData, count: returnsCount } = await supabase
       .from("sales")
-      .select("quantity, status_changed_at, stores(managed_by)")
+      .select("quantity, status_changed_at, stores!inner(managed_by)", {
+        count: "exact",
+      })
+      .eq("stores.managed_by", currentUser)
       .eq("status", "batal")
       .gte("status_changed_at", start.toISOString())
-      .lt("status_changed_at", end.toISOString());
-
-    const returnsData = (rawReturnsData ?? []).filter(
-      (r: any) => r.stores?.managed_by === currentUser,
-    );
+      .lt("status_changed_at", end.toISOString())
+      .order("status_changed_at", { ascending: false })
+      .limit(1000);
 
     const { data: rawStores } = await supabase
       .from("stores")
@@ -916,9 +926,15 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     const allStores = (rawStores ?? []).filter(
       (s: any) => s.managed_by === currentUser,
     );
-    const salesData = (rawSalesData ?? []).filter(
-      (s: any) => s.stores?.managed_by === currentUser,
-    );
+    const salesData = rawSalesData ?? [];
+
+    // Kalau jumlah baris yang cocok lebih besar dari yang berhasil
+    // dimuat, grafik/ranking di bawah ini pasti meleset -- tandai
+    // supaya kelihatan, bukan diam-diam salah seperti sebelumnya.
+    const isIncomplete =
+      (salesCount ?? 0) > salesData.length ||
+      (returnsCount ?? 0) > (returnsData ?? []).length;
+    setOverviewIncomplete(isIncomplete);
 
     const sevenDaysAgo = new Date(reference);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
@@ -937,7 +953,7 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
     > = {};
     const byStore: Record<string, { current: number; previous: number }> = {};
 
-    (salesData ?? []).forEach((s: any) => {
+    salesData.forEach((s: any) => {
       const dayKey = (s.sold_at as string).split("T")[0];
       const targetDay = dayMap.get(dayKey);
       if (targetDay) {
@@ -973,7 +989,7 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
       }
     });
 
-    returnsData.forEach((r: any) => {
+    (returnsData ?? []).forEach((r: any) => {
       const dayKey = (r.status_changed_at as string).split("T")[0];
       const targetDay = dayMap.get(dayKey);
       if (targetDay) {
@@ -1155,6 +1171,13 @@ function OverviewSection({ currentUser }: { currentUser: string }) {
           )}
         </div>
       </div>
+
+      {overviewIncomplete && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2.5 mb-6 text-sm text-amber-200">
+          Data di rentang 14 hari ini terlalu banyak untuk dimuat sekaligus,
+          jadi grafik dan ranking di bawah bisa belum lengkap.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 mb-6">
         {/* Tren penjualan */}

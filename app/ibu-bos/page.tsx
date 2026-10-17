@@ -231,7 +231,6 @@ export default function IbuBosPage() {
   async function loadOverview(referenceDateStr: string) {
     const reference = new Date(`${referenceDateStr}T12:00:00`);
 
-    // Bangun 14 hari berturut-turut berakhir di tanggal referensi
     const days: SalesDay[] = [];
     for (let i = 13; i >= 0; i--) {
       const d = new Date(reference);
@@ -249,63 +248,56 @@ export default function IbuBosPage() {
     end.setDate(end.getDate() + 1);
     end.setHours(0, 0, 0, 0);
 
-    const { data: salesData } = await supabase
-      .from("sales")
-      .select("quantity, sold_at, products(id, full_name, photo_url)")
-      .gte("sold_at", start.toISOString())
-      .lt("sold_at", end.toISOString());
-
-    const { data: returnsData } = await supabase
-      .from("sales")
-      .select("quantity, status_changed_at")
-      .eq("status", "batal")
-      .gte("status_changed_at", start.toISOString())
-      .lt("status_changed_at", end.toISOString());
-
     const sevenDaysAgo = new Date(reference);
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
-    const topMap = new Map<
-      string,
-      { name: string; photo_url: string | null; qty: number }
-    >();
-    let last7Total = 0;
+    // Dihitung di database lewat RPC -- hasilnya cuma ~14 baris trend
+    // dan 5 baris top produk, bukan ribuan baris mentah semua toko.
+    // Jadi tidak kena plafon 1000 baris Supabase lagi.
+    const [
+      { data: trendData },
+      { data: returnsTrendData },
+      { data: topData },
+      { data: last7Data },
+    ] = await Promise.all([
+      supabase.rpc("overview_sales_trend", {
+        p_start: start.toISOString(),
+        p_end: end.toISOString(),
+      }),
+      supabase.rpc("overview_returns_trend", {
+        p_start: start.toISOString(),
+        p_end: end.toISOString(),
+      }),
+      supabase.rpc("overview_top_products", {
+        p_start: start.toISOString(),
+        p_end: end.toISOString(),
+        p_limit: 5,
+      }),
+      supabase.rpc("overview_total_qty", {
+        p_start: sevenDaysAgo.toISOString(),
+        p_end: end.toISOString(),
+      }),
+    ]);
 
-    (salesData ?? []).forEach((s: any) => {
-      const key = (s.sold_at as string).split("T")[0];
-      const day = dayMap.get(key);
-      if (day) day.qty += s.quantity;
-
-      if (new Date(s.sold_at) >= sevenDaysAgo) last7Total += s.quantity;
-
-      const productId = s.products?.id ?? "unknown";
-      const name = s.products?.full_name ?? "Produk";
-      const photoUrl = s.products?.photo_url ?? null;
-      if (!topMap.has(productId)) {
-        topMap.set(productId, { name, photo_url: photoUrl, qty: 0 });
-      }
-      topMap.get(productId)!.qty += s.quantity;
+    (trendData ?? []).forEach((row: any) => {
+      const day = dayMap.get(row.day);
+      if (day) day.qty = Number(row.total);
     });
-
-    (returnsData ?? []).forEach((r: any) => {
-      const key = (r.status_changed_at as string).split("T")[0];
-      const day = dayMap.get(key);
-      if (day) day.returned += r.quantity;
+    (returnsTrendData ?? []).forEach((row: any) => {
+      const day = dayMap.get(row.day);
+      if (day) day.returned = Number(row.total);
     });
 
     setSalesTrend(days);
-    setSalesLast7(last7Total);
+    setSalesLast7(Number(last7Data ?? 0));
     setTopProducts(
-      Array.from(topMap.entries())
-        .map(([id, p]) => ({
-          id,
-          name: p.name,
-          photo_url: p.photo_url,
-          qty: p.qty,
-        }))
-        .sort((a, b) => b.qty - a.qty)
-        .slice(0, 5),
+      (topData ?? []).map((p: any) => ({
+        id: p.product_id,
+        name: p.full_name,
+        photo_url: p.photo_url,
+        qty: Number(p.qty),
+      })),
     );
 
     const { count } = await supabase
