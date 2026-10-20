@@ -128,11 +128,11 @@ function CopyChip({
       className="text-right group"
       title={`Klik untuk salin ${label.toLowerCase()}`}
     >
-      <p className="text-[10px] text-neutral-500 group-hover:text-accent-400 transition-colors">
-        {copied ? "Tersalin!" : label}
-      </p>
-      <p className="text-xs font-mono text-neutral-300 group-hover:text-accent-400 transition-colors">
-        {value}
+      <p className="text-xs text-neutral-300 group-hover:text-accent-400 transition-colors">
+        <span className="text-[10px] text-neutral-500 mr-1.5">
+          {copied ? "Tersalin!" : label}
+        </span>
+        <span className="font-mono">{value}</span>
       </p>
     </button>
   );
@@ -587,7 +587,7 @@ export default function CatatanPenjualanSection({
         {grouped.map((g: any) => (
           <div
             key={g.key}
-            className={`border rounded-xl p-3 hover:border-accent-500/50 transition-colors duration-200 ${STAGE_META[g.stage as SaleStage].card}`}
+            className={`border rounded-xl p-4 hover:border-accent-500/50 transition-colors duration-200 ${STAGE_META[g.stage as SaleStage].card}`}
           >
             <div className="flex items-start justify-between mb-2.5 gap-3">
               <div className="flex items-center gap-2 text-xs text-neutral-500">
@@ -603,7 +603,7 @@ export default function CatatanPenjualanSection({
                 </span>
               </div>
 
-              <div className="shrink-0 flex flex-col items-end gap-1.5">
+              <div className="shrink-0 flex flex-col items-end gap-1">
                 {g.trackingNo && (
                   <CopyChip
                     label="No. Resi"
@@ -634,7 +634,7 @@ export default function CatatanPenjualanSection({
               cancelledAt={g.cancelled_at}
             />
 
-            <div className="space-y-1.5">
+            <div className="mt-2.5 space-y-2">
               {g.items.map((it: any, i: number) => (
                 <div key={i} className="flex items-center gap-3">
                   {it.photo ? (
@@ -642,10 +642,10 @@ export default function CatatanPenjualanSection({
                       src={it.photo}
                       alt={it.product}
                       loading="lazy"
-                      className="w-24 aspect-video rounded-lg object-cover shrink-0"
+                      className="w-52 aspect-video rounded-lg object-cover shrink-0"
                     />
                   ) : (
-                    <div className="w-24 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
+                    <div className="w-52 aspect-video rounded-lg bg-black/30 flex items-center justify-center shrink-0">
                       <Package
                         size={18}
                         strokeWidth={1.5}
