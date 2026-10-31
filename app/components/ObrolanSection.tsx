@@ -103,13 +103,7 @@ export default function ObrolanSection({
           id: 0,
           user_name: userLabel,
           role: "model",
-          content: `Halo ${userLabel}! Saya Modi, AI Modius 😊 Ada yang bisa Modi bantu?
-Modi bisa bantu kamu untuk:
-• Analisis stok & performa produk 📊
-• Strategi beriklan & bikin laporan 📈
-• Rangkai kata-kata balasan chat pembeli (bisa nanganin pembeli rewel/unik!) 💬
-• Diskusi & ngobrol santai ☕
-Tinggal ketik saja di bawah, Modi siap bantu kapan saja!`,
+          content: `Halo ${userLabel}! Saya Modi, AI Modius 😊 Saat ini Modi masih dalam tahap pengembangan, jadi fitur pembuatan laporan belum tersedia ya. Ada hal lain yang bisa Modi bantu?`,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -187,8 +181,8 @@ Tinggal ketik saja di bawah, Modi siap bantu kapan saja!`,
           <h2 className="text-lg font-semibold text-neutral-100">Diskusi</h2>
           <p className="text-xs text-neutral-500 mt-0.5">
             {activeTab === "admin"
-              ? `Obrolan internal bersama ${partner}`
-              : "Belajar & Diskusi bersama MODI AI"}
+              ? `Ruang santai bareng ${partner}`
+              : `Diskusi bareng Modi AI`}
           </p>
         </div>
         <div className="flex items-center gap-1 bg-black/40 p-1 border border-line rounded-lg">
