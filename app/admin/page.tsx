@@ -2979,6 +2979,14 @@ function MappingsSection() {
   );
 }
 
+const lastReadKey = (u: string) => `modiusChatLastRead_${u}`;
+
+function markChatRead(u: string) {
+  try {
+    localStorage.setItem(lastReadKey(u), new Date().toISOString());
+  } catch {}
+}
+
 function AdminPageContent() {
   const [activeSection, setActiveSection] = useState<Section>("overview");
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(null);
@@ -2988,6 +2996,19 @@ function AdminPageContent() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const router = useRouter();
 
+  // Ref: supaya listener realtime selalu tahu halaman yang sedang aktif
+  const activeSectionRef = useRef<Section>(activeSection);
+
+  // Saat masuk/keluar halaman Diskusi: reset titik & catat waktu terakhir baca
+  useEffect(() => {
+    activeSectionRef.current = activeSection;
+    if (!currentUser || activeSection !== "chat") return;
+    setHasUnreadChat(false);
+    markChatRead(currentUser);
+    return () => markChatRead(currentUser);
+  }, [activeSection, currentUser]);
+
+  // Presence: status online/offline (tidak berubah dari kode awal)
   useEffect(() => {
     if (!currentUser) return;
     const channel = supabase.channel("admin-presence", {
@@ -3009,18 +3030,52 @@ function AdminPageContent() {
     };
   }, [currentUser]);
 
-  // // Notifikasi: dengar pesan baru dari lawan bicara
+  // Cek pesan belum dibaca saat halaman pertama dibuka / di-refresh
+  useEffect(() => {
+    if (!currentUser) return;
+    (async () => {
+      let since = "";
+      try {
+        since = localStorage.getItem(lastReadKey(currentUser)) ?? "";
+      } catch {}
+      if (!since) {
+        since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      }
+
+      const { count } = await supabase
+        .from("chat_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("type", "admin")
+        .neq("sender", currentUser)
+        .gt("created_at", since);
+
+      if ((count ?? 0) > 0 && activeSectionRef.current !== "chat") {
+        setHasUnreadChat(true);
+      }
+    })();
+  }, [currentUser]);
+
+  // Notifikasi: dengar pesan baru dari lawan bicara
   useEffect(() => {
     if (!currentUser) return;
     const channel = supabase
-      .channel("chat_notify")
+      .channel(`chat_notify_${currentUser}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "chat_messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: "type=eq.admin",
+        },
         (payload) => {
-          if (payload.new.sender !== currentUser) {
-            setHasUnreadChat(true);
+          const sender = (payload.new as { sender: string }).sender;
+          if (sender === currentUser) return; // pesan sendiri
+          if (activeSectionRef.current === "chat") {
+            markChatRead(currentUser); // sedang dilihat, anggap terbaca
+            return;
           }
+          setHasUnreadChat(true);
         },
       )
       .subscribe();
@@ -3030,6 +3085,7 @@ function AdminPageContent() {
     };
   }, [currentUser]);
 
+  // Ambil user dari sessionStorage (tidak berubah)
   useEffect(() => {
     const stored = sessionStorage.getItem("modiusUser");
     if (stored === "Hendi" || stored === "Gita") {
@@ -3039,6 +3095,7 @@ function AdminPageContent() {
     }
   }, []);
 
+  // Hitung batch QC pending (tidak berubah)
   useEffect(() => {
     loadQcPendingCount();
   }, []);
