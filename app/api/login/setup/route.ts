@@ -2,6 +2,11 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  SESSION_COOKIE,
+  createSessionToken,
+  sessionCookieOptions,
+} from "@/lib/session";
 
 const ALLOWED = ["hendi", "gita"];
 
@@ -15,15 +20,29 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
-  if (!password || password.length < 4) {
+  if (!password || password.length < 8) {
     return NextResponse.json(
-      { ok: false, error: "Password minimal 4 karakter" },
+      { ok: false, error: "Password minimal 8 karakter" },
+      { status: 400 },
+    );
+  }
+  // bcrypt hanya membaca 72 byte pertama; di atas itu sisanya diabaikan diam-diam.
+  if (Buffer.byteLength(password, "utf8") > 72) {
+    return NextResponse.json(
+      { ok: false, error: "Password terlalu panjang (maksimal 72 karakter)" },
       { status: 400 },
     );
   }
   if (!hint || hint.trim().length < 2) {
     return NextResponse.json(
       { ok: false, error: "Isi kata rahasia buat jaga-jaga lupa password" },
+      { status: 400 },
+    );
+  }
+  // Hint bisa diminta siapa pun dari halaman login, jadi tidak boleh memuat passwordnya.
+  if (hint.toLowerCase().includes(password.toLowerCase())) {
+    return NextResponse.json(
+      { ok: false, error: "Kata rahasia tidak boleh memuat password" },
       { status: 400 },
     );
   }
@@ -44,9 +63,13 @@ export async function POST(req: Request) {
 
   const password_hash = await bcrypt.hash(password, 10);
 
-  const { error } = await supabaseAdmin
-    .from("admin_users")
-    .upsert({ name: key, password_hash, hint: hint.trim() });
+  const { error } = await supabaseAdmin.from("admin_users").upsert({
+    name: key,
+    password_hash,
+    hint: hint.trim(),
+    failed_attempts: 0,
+    locked_until: null,
+  });
 
   if (error) {
     return NextResponse.json(
@@ -55,14 +78,12 @@ export async function POST(req: Request) {
     );
   }
 
-  // Setelah bikin password, langsung anggap login
+  // Setelah bikin password, langsung anggap login (cookie bertanda tangan)
   const res = NextResponse.json({ ok: true });
-  res.cookies.set("modius_session", key, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+  res.cookies.set(
+    SESSION_COOKIE,
+    createSessionToken(key),
+    sessionCookieOptions(),
+  );
   return res;
 }

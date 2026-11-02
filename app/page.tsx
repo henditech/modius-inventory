@@ -198,8 +198,8 @@ export default function HomePage() {
     if (!pendingMatch) return;
     setSetupError("");
 
-    if (setupPassword.length < 4) {
-      setSetupError("Password minimal 4 karakter");
+    if (setupPassword.length < 8) {
+      setSetupError("Password minimal 8 karakter");
       return;
     }
     if (setupHint.trim().length < 2) {
@@ -247,7 +247,9 @@ export default function HomePage() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        setPasswordError("Password salah, coba lagi");
+        setPasswordError(
+          res.status === 429 ? data.error : "Password salah, coba lagi",
+        );
         setPasswordLoading(false);
         return;
       }
@@ -690,7 +692,7 @@ export default function HomePage() {
               setSetupHint(e.target.value);
               setSetupError("");
             }}
-            placeholder="Kata rahasia untuk lupa password (misal: nama kucing atau apa saja)"
+            placeholder="kata rahasia buat jaga-jaga lupa password"
             className="w-full bg-black/40 border border-neutral-700 rounded-lg px-4 py-3.5 text-center text-sm mb-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50"
           />
           {setupError && (
