@@ -4,6 +4,8 @@ import { supabase } from "@/lib/supabase";
 import ReactMarkdown from "react-markdown";
 
 type AdminUser = "Hendi" | "Gita";
+
+// Pesan Modi (tabel modius_chats)
 type ChatMessage = {
   id: number;
   user_name: string;
@@ -12,7 +14,25 @@ type ChatMessage = {
   created_at: string;
 };
 
-const CHAT_TTL_MS = 24 * 60 * 60 * 1000; // 24 jam
+// Pesan antar admin (tabel chat_messages)
+type AdminChatMessage = {
+  id: string;
+  sender: string;
+  recipient: string;
+  body: string;
+  type: string;
+  created_at: string;
+};
+
+// Bentuk seragam untuk dirender
+type DisplayMessage = {
+  id: string | number;
+  role: "user" | "model" | "partner";
+  content: string;
+  created_at: string;
+};
+
+const CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari (sinkron dengan cron di server)
 
 function formatChatTime(iso: string) {
   const d = new Date(iso);
@@ -38,20 +58,22 @@ export default function ObrolanSection({
   const partnerOnline = onlineUsers.includes(partner);
 
   const [activeTab, setActiveTab] = useState<"admin" | "modi">("modi");
-  const [adminMessages, setAdminMessages] = useState<ChatMessage[]>([]);
+  const [adminMessages, setAdminMessages] = useState<AdminChatMessage[]>([]);
   const [modiMessages, setModiMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [aiTyping, setAiTyping] = useState(false);
+  const [sendError, setSendError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // === Muat Riwayat & Pantau Real-time ===
   useEffect(() => {
     loadHistory();
 
-    const channel = supabase
-      .channel("modi_chat_live")
+    // Channel 1: balasan Modi
+    const modiChannel = supabase
+      .channel(`modi_chat_live_${currentUser}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "modius_chats" },
@@ -70,34 +92,54 @@ export default function ObrolanSection({
       )
       .subscribe();
 
+    // Channel 2: chat antar admin
+    const adminChannel = supabase
+      .channel(`admin_chat_live_${currentUser}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: "type=eq.admin",
+        },
+        (payload) => {
+          const msg = payload.new as AdminChatMessage;
+          setAdminMessages((prev) =>
+            prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
+          );
+        },
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(modiChannel);
+      supabase.removeChannel(adminChannel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   // Auto scroll ke bawah
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [modiMessages, aiTyping, activeTab]);
+  }, [modiMessages, adminMessages, aiTyping, activeTab]);
 
   // Muat riwayat dari Supabase
+  // (penghapusan pesan lama dilakukan oleh pg_cron di server, bukan di sini)
   async function loadHistory() {
     setLoading(true);
     const cutoff = new Date(Date.now() - CHAT_TTL_MS).toISOString();
     const userLabel = `Kak ${currentUser}`;
 
-    // Hapus pesan yang sudah lewat 24 jam
-    await supabase.from("modius_chats").delete().lt("created_at", cutoff);
-
-    // Ambil riwayat untuk pengguna saat ini
-    const { data } = await supabase
+    // Riwayat Modi
+    const { data: modiData } = await supabase
       .from("modius_chats")
       .select("*")
       .eq("user_name", userLabel)
       .gte("created_at", cutoff)
       .order("created_at", { ascending: true });
 
-    if (!data || data.length === 0) {
+    if (!modiData || modiData.length === 0) {
       setModiMessages([
         {
           id: 0,
@@ -108,24 +150,64 @@ export default function ObrolanSection({
         },
       ]);
     } else {
-      setModiMessages(data);
+      setModiMessages(modiData);
     }
+
+    // Riwayat chat antar admin
+    const { data: adminData } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("type", "admin")
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: true });
+
+    setAdminMessages((adminData as AdminChatMessage[]) ?? []);
 
     setLoading(false);
   }
 
-  // Kirim pesan ke Modi
-  async function handleSend() {
-    const body = text.trim();
-    if (!body || sending || aiTyping) return;
+  // Kirim pesan ke partner (Hendi <-> Gita)
+  async function sendToPartner(body: string) {
+    setSending(true);
+    setSendError("");
+    setText("");
 
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .insert({
+        sender: currentUser,
+        recipient: partner,
+        body,
+        type: "admin",
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      console.error("Error kirim pesan admin:", error);
+      setText(body); // kembalikan teks supaya tidak hilang
+      setSendError("Pesan gagal terkirim. Coba lagi ya.");
+    } else {
+      // Tampilkan langsung (realtime akan di-dedupe lewat id)
+      const sent = data as AdminChatMessage;
+      setAdminMessages((prev) =>
+        prev.some((m) => m.id === sent.id) ? prev : [...prev, sent],
+      );
+    }
+
+    setSending(false);
+  }
+
+  // Kirim pesan ke Modi
+  async function sendToModi(body: string) {
     setText("");
     setSending(true);
     setAiTyping(true);
+    setSendError("");
 
     const userLabel = `Kak ${currentUser}`;
 
-    // ✅ Tampilkan pesan user LANGSUNG — gak nunggu refresh!
+    // Tampilkan pesan user langsung
     const tempUserMsg: ChatMessage = {
       id: Date.now(),
       user_name: userLabel,
@@ -163,7 +245,36 @@ export default function ObrolanSection({
     }
   }
 
-  const displayMessages = activeTab === "modi" ? modiMessages : adminMessages;
+  // Router: kirim sesuai tab yang aktif
+  async function handleSend() {
+    const body = text.trim();
+    if (!body || busy) return;
+
+    if (activeTab === "admin") {
+      await sendToPartner(body);
+    } else {
+      await sendToModi(body);
+    }
+  }
+
+  // Status sibuk hanya relevan untuk tab yang sedang aktif
+  const busy = activeTab === "modi" ? sending || aiTyping : sending;
+
+  // Seragamkan kedua sumber pesan jadi satu bentuk untuk dirender
+  const displayMessages: DisplayMessage[] =
+    activeTab === "modi"
+      ? modiMessages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          created_at: m.created_at,
+        }))
+      : adminMessages.map((m) => ({
+          id: m.id,
+          role: m.sender === currentUser ? "user" : "partner",
+          content: m.body,
+          created_at: m.created_at,
+        }));
 
   if (loading) {
     return (
@@ -187,7 +298,10 @@ export default function ObrolanSection({
         </div>
         <div className="flex items-center gap-1 bg-black/40 p-1 border border-line rounded-lg">
           <button
-            onClick={() => setActiveTab("admin")}
+            onClick={() => {
+              setActiveTab("admin");
+              setSendError("");
+            }}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               activeTab === "admin"
                 ? "bg-neutral-800 text-white shadow-sm"
@@ -202,7 +316,10 @@ export default function ObrolanSection({
             {partner}
           </button>
           <button
-            onClick={() => setActiveTab("modi")}
+            onClick={() => {
+              setActiveTab("modi");
+              setSendError("");
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
               activeTab === "modi"
                 ? "bg-accent-500/20 text-accent-400 border border-accent-500/30"
@@ -216,9 +333,16 @@ export default function ObrolanSection({
 
       {/* DAFTAR PESAN */}
       <div className="flex-1 overflow-y-auto rounded-lg border border-line bg-panel/50 p-4 space-y-3">
+        {activeTab === "admin" && displayMessages.length === 0 && (
+          <div className="h-full flex items-center justify-center text-xs text-neutral-600">
+            Belum ada pesan. Sapa {partner} duluan yuk 👋
+          </div>
+        )}
+
         {displayMessages.map((m, i) => {
           const isUser = m.role === "user";
           const isModi = m.role === "model";
+          const isPartner = m.role === "partner";
           const prev = displayMessages[i - 1];
           const showDateDivider =
             !prev ||
@@ -239,12 +363,19 @@ export default function ObrolanSection({
                   className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm ${
                     isUser
                       ? "bg-accent-500 text-white rounded-br-sm"
-                      : "bg-accent-950/40 border border-accent-500/30 text-neutral-100 rounded-bl-sm"
+                      : isPartner
+                        ? "bg-neutral-800 border border-neutral-700 text-neutral-100 rounded-bl-sm"
+                        : "bg-accent-950/40 border border-accent-500/30 text-neutral-100 rounded-bl-sm"
                   }`}
                 >
                   {isModi && (
                     <div className="flex items-center gap-1 text-[11px] font-semibold text-accent-400 mb-1">
                       <span>✨ MODI</span>
+                    </div>
+                  )}
+                  {isPartner && (
+                    <div className="text-[11px] font-semibold text-neutral-400 mb-1">
+                      {partner}
                     </div>
                   )}
                   <div className="break-words leading-relaxed">
@@ -297,6 +428,11 @@ export default function ObrolanSection({
         <div ref={bottomRef} />
       </div>
 
+      {/* PESAN ERROR */}
+      {sendError && (
+        <div className="mt-2 text-xs text-red-400">{sendError}</div>
+      )}
+
       {/* KOTAK KETIK & KIRIM */}
       <div className="mt-3 flex items-center gap-2">
         <input
@@ -308,6 +444,7 @@ export default function ObrolanSection({
               handleSend();
             }
           }}
+          maxLength={2000}
           placeholder={
             activeTab === "modi"
               ? "Ngobrol atau tanya apa saja ke Modi…"
@@ -317,10 +454,10 @@ export default function ObrolanSection({
         />
         <button
           onClick={handleSend}
-          disabled={!text.trim() || sending || aiTyping}
+          disabled={!text.trim() || busy}
           className="shine-btn bg-accent-500 hover:bg-accent-400 disabled:opacity-40 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors shrink-0"
         >
-          {aiTyping ? "Memikirkan..." : "Kirim"}
+          {activeTab === "modi" && aiTyping ? "Memikirkan..." : "Kirim"}
         </button>
       </div>
     </div>
