@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import ChangePasswordForm from "./components/ChangePasswordForm";
 
 const AVATARS: Record<string, string> = {
   Hendi: "/avatars/hendi.png",
@@ -63,7 +64,7 @@ type PendingMatch = {
   match: (typeof ROUTES)[string];
 };
 
-type Step = "name" | "checking" | "setup" | "password";
+type Step = "name" | "checking" | "setup" | "password" | "change";
 
 // Berapa lama greeting tampil normal sebelum efek portal mulai
 const HOLD_MS = 700;
@@ -774,6 +775,17 @@ export default function HomePage() {
             </button>
             <button
               type="button"
+              onClick={() => {
+                setStep("change");
+                setPasswordError("");
+                setHint(null);
+              }}
+              className="text-neutral-500 hover:text-neutral-300"
+            >
+              Ganti password
+            </button>
+            <button
+              type="button"
               onClick={handleForgotPassword}
               className="text-neutral-500 hover:text-neutral-300"
             >
@@ -787,6 +799,24 @@ export default function HomePage() {
             </p>
           )}
         </form>
+      )}
+
+      {step === "change" && pendingMatch && (
+        <ChangePasswordForm
+          userKey={pendingMatch.key}
+          displayName={pendingMatch.match.displayName}
+          avatarSrc={AVATARS[pendingMatch.match.displayName] || "/logo.png"}
+          onSuccess={() => {
+            if (pendingMatch.match.asUser) {
+              sessionStorage.setItem("modiusUser", pendingMatch.match.asUser);
+            }
+            startGreeting(
+              pendingMatch.match.displayName,
+              pendingMatch.match.path,
+            );
+          }}
+          onBack={() => setStep("password")}
+        />
       )}
 
       {footer}
