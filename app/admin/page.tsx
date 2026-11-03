@@ -2,6 +2,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import ObrolanSection from "../components/ObrolanSection";
+import AnalyticsSection from "../components/analytics/AnalyticsSection";
 import {
   DialogProvider,
   useConfirm,
@@ -38,6 +39,7 @@ import {
   Search,
   MessageCircle,
   PackageCheck,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -65,7 +67,8 @@ type Section =
   | "sales"
   | "returns"
   | "master"
-  | "chat";
+  | "chat"
+  | "analytics";
 type AdminUser = "Hendi" | "Gita";
 
 const AVATARS: Record<string, string> = {
@@ -79,6 +82,7 @@ const SECTIONS: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "qc", label: "QC Checkpoint", icon: ShieldCheck },
   { id: "sales", label: "Catatan Penjualan", icon: Wallet },
   { id: "returns", label: "Catatan Retur", icon: Undo2 },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "master", label: "Kelola Master Data", icon: Database },
   { id: "chat", label: "Diskusi", icon: MessageCircle },
 ];
@@ -3241,6 +3245,9 @@ function AdminPageContent() {
           )}
           {activeSection === "returns" && (
             <CatatanReturSection currentUser={currentUser} />
+          )}
+          {activeSection === "analytics" && (
+            <AnalyticsSection currentUser={currentUser} />
           )}
           {activeSection === "master" && (
             <MasterDataSection currentUser={currentUser} />
