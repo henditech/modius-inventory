@@ -96,3 +96,32 @@ export function sortForSaving<
     return a.file.name < b.file.name ? -1 : a.file.name > b.file.name ? 1 : 0;
   });
 }
+
+// Waktu lengkap dalam WIB, mis. "31 Okt, 21.38"
+export function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("id-ID", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Jakarta",
+  });
+}
+
+// "-Rp1.500" ditulis dengan tanda minus yang jelas: "−Rp1.500"
+export const rpSigned = (n: number): string => (n < 0 ? `−${rp(-n)}` : rp(n));
+
+// 74.6 -> "74,6%"
+export const fmtPct = (n: number): string =>
+  `${n.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+
+// Status pencocokan penghasilan vs saldo (kode dari fungsi database -> kata untuk pengguna)
+export const RECON_LABEL: Record<string, string> = {
+  COCOK: "Cocok",
+  COCOK_NOL: "Cocok (penghasilan Rp0)",
+  BEDA_NOMINAL: "Beda nominal",
+  HANYA_DI_PENGHASILAN: "Ada di penghasilan, belum di saldo",
+  HANYA_DI_SALDO: "Ada di saldo, tidak ada di penghasilan",
+};
