@@ -41,8 +41,7 @@ function formatChatTime(iso: string) {
 
 function formatChatDate(iso: string) {
   const d = new Date(iso);
-  const today = new Date();
-  const isToday = d.toDateString() === today.toDateString();
+  const isToday = d.toDateString() === new Date().toDateString();
   if (isToday) return "Hari ini";
   return d.toLocaleDateString("id-ID", { day: "numeric", month: "long" });
 }
@@ -56,6 +55,7 @@ export default function ObrolanSection({
 }) {
   const partner: AdminUser = currentUser === "Hendi" ? "Gita" : "Hendi";
   const partnerOnline = onlineUsers.includes(partner);
+  const userLabel = `Kak ${currentUser}`;
 
   const [activeTab, setActiveTab] = useState<"admin" | "modi">("modi");
   const [adminMessages, setAdminMessages] = useState<AdminChatMessage[]>([]);
@@ -63,36 +63,16 @@ export default function ObrolanSection({
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [aiTyping, setAiTyping] = useState(false);
+  const [aiTyping, setAiTyping] = useState(false); // true sampai potongan pertama tiba
   const [sendError, setSendError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // === Muat Riwayat & Pantau Real-time ===
+  // === Muat riwayat & pantau chat antar admin (real-time) ===
+  // Catatan: balasan Modi SENGAJA tidak lewat Realtime. Balasan hanya
+  // ditampilkan dari stream, jadi tidak mungkin dobel.
   useEffect(() => {
     loadHistory();
 
-    // Channel 1: balasan Modi
-    const modiChannel = supabase
-      .channel(`modi_chat_live_${currentUser}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "modius_chats" },
-        (payload) => {
-          const newMsg = payload.new as ChatMessage;
-          if (newMsg.user_name !== `Kak ${currentUser}`) return;
-
-          // Pesan user sudah ditampilkan lokal saat kirim, jadi skip
-          if (newMsg.role === "user") return;
-
-          setModiMessages((prev) =>
-            prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg],
-          );
-          setAiTyping(false);
-        },
-      )
-      .subscribe();
-
-    // Channel 2: chat antar admin
     const adminChannel = supabase
       .channel(`admin_chat_live_${currentUser}`)
       .on(
@@ -113,7 +93,6 @@ export default function ObrolanSection({
       .subscribe();
 
     return () => {
-      supabase.removeChannel(modiChannel);
       supabase.removeChannel(adminChannel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,13 +104,11 @@ export default function ObrolanSection({
   }, [modiMessages, adminMessages, aiTyping, activeTab]);
 
   // Muat riwayat dari Supabase
-  // (penghapusan pesan lama dilakukan oleh pg_cron di server, bukan di sini)
+  // (penghapusan pesan lama dilakukan oleh pg_cron di server)
   async function loadHistory() {
     setLoading(true);
     const cutoff = new Date(Date.now() - CHAT_TTL_MS).toISOString();
-    const userLabel = `Kak ${currentUser}`;
 
-    // Riwayat Modi
     const { data: modiData } = await supabase
       .from("modius_chats")
       .select("*")
@@ -153,7 +130,6 @@ export default function ObrolanSection({
       setModiMessages(modiData);
     }
 
-    // Riwayat chat antar admin
     const { data: adminData } = await supabase
       .from("chat_messages")
       .select("*")
@@ -162,7 +138,6 @@ export default function ObrolanSection({
       .order("created_at", { ascending: true });
 
     setAdminMessages((adminData as AdminChatMessage[]) ?? []);
-
     setLoading(false);
   }
 
@@ -174,12 +149,7 @@ export default function ObrolanSection({
 
     const { data, error } = await supabase
       .from("chat_messages")
-      .insert({
-        sender: currentUser,
-        recipient: partner,
-        body,
-        type: "admin",
-      })
+      .insert({ sender: currentUser, recipient: partner, body, type: "admin" })
       .select()
       .single();
 
@@ -188,7 +158,6 @@ export default function ObrolanSection({
       setText(body); // kembalikan teks supaya tidak hilang
       setSendError("Pesan gagal terkirim. Coba lagi ya.");
     } else {
-      // Tampilkan langsung (realtime akan di-dedupe lewat id)
       const sent = data as AdminChatMessage;
       setAdminMessages((prev) =>
         prev.some((m) => m.id === sent.id) ? prev : [...prev, sent],
@@ -198,54 +167,91 @@ export default function ObrolanSection({
     setSending(false);
   }
 
-  // Kirim pesan ke Modi
+  // Kirim pesan ke Modi (streaming)
   async function sendToModi(body: string) {
     setText("");
     setSending(true);
     setAiTyping(true);
     setSendError("");
 
-    const userLabel = `Kak ${currentUser}`;
+    const now = Date.now();
+    const userMsgId = now;
+    const modelMsgId = now + 1;
 
-    // Tampilkan pesan user langsung
-    const tempUserMsg: ChatMessage = {
-      id: Date.now(),
-      user_name: userLabel,
-      role: "user",
-      content: body,
-      created_at: new Date().toISOString(),
+    // 1. Tampilkan pesan user langsung
+    setModiMessages((prev) => [
+      ...prev,
+      {
+        id: userMsgId,
+        user_name: userLabel,
+        role: "user",
+        content: body,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    let modelBubbleCreated = false;
+
+    // Tulis/ubah isi bubble Modi (dibuat saat potongan pertama datang)
+    const writeModelContent = (content: string) => {
+      if (!modelBubbleCreated) {
+        modelBubbleCreated = true;
+        setAiTyping(false); // indikator "mengetik" diganti bubble asli
+        setModiMessages((prev) => [
+          ...prev,
+          {
+            id: modelMsgId,
+            user_name: userLabel,
+            role: "model",
+            content,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        setModiMessages((prev) =>
+          prev.map((m) => (m.id === modelMsgId ? { ...m, content } : m)),
+        );
+      }
     };
-    setModiMessages((prev) => [...prev, tempUserMsg]);
 
     try {
       const res = await fetch("/api/modi-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: body,
-          userName: currentUser,
-        }),
+        body: JSON.stringify({ prompt: body, userName: currentUser }),
       });
 
-      if (!res.ok) throw new Error("Gagal kirim ke API");
-      // Balasan muncul otomatis lewat realtime
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      if (!res.body) throw new Error("Stream kosong");
+
+      // 2. Baca stream dari server
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        if (accumulated) writeModelContent(accumulated);
+      }
+      accumulated += decoder.decode(); // buang sisa byte di decoder
+
+      if (!modelBubbleCreated) {
+        writeModelContent("Hmm, Modi belum bisa menjawab Kak. Coba lagi ya 😊");
+      }
     } catch (err) {
-      console.error("Error kirim pesan:", err);
-      setAiTyping(false);
-      const errorMsg: ChatMessage = {
-        id: Date.now() + 1,
-        user_name: userLabel,
-        role: "model",
-        content: "Aduh, koneksi ke Modi terputus Kak. Coba lagi ya 😊",
-        created_at: new Date().toISOString(),
-      };
-      setModiMessages((prev) => [...prev, errorMsg]);
+      console.error("Error kirim pesan ke Modi:", err);
+      writeModelContent("Aduh, koneksi ke Modi terputus Kak. Coba lagi ya 😊");
     } finally {
+      setAiTyping(false);
       setSending(false);
     }
   }
 
-  // Router: kirim sesuai tab yang aktif
+  // Busy = sedang ada proses kirim di tab aktif
+  const busy = sending;
+
   async function handleSend() {
     const body = text.trim();
     if (!body || busy) return;
@@ -257,10 +263,7 @@ export default function ObrolanSection({
     }
   }
 
-  // Status sibuk hanya relevan untuk tab yang sedang aktif
-  const busy = activeTab === "modi" ? sending || aiTyping : sending;
-
-  // Seragamkan kedua sumber pesan jadi satu bentuk untuk dirender
+  // Seragamkan dua sumber pesan untuk dirender
   const displayMessages: DisplayMessage[] =
     activeTab === "modi"
       ? modiMessages.map((m) => ({
@@ -417,7 +420,7 @@ export default function ObrolanSection({
           );
         })}
 
-        {/* Indikator Modi Mengetik */}
+        {/* Indikator Modi mengetik (hanya sampai potongan pertama tiba) */}
         {activeTab === "modi" && aiTyping && (
           <div className="flex justify-start">
             <div className="bg-accent-950/30 border border-accent-500/20 text-neutral-400 px-3 py-2 rounded-2xl rounded-bl-sm text-xs flex items-center gap-2">
@@ -457,7 +460,7 @@ export default function ObrolanSection({
           disabled={!text.trim() || busy}
           className="shine-btn bg-accent-500 hover:bg-accent-400 disabled:opacity-40 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors shrink-0"
         >
-          {activeTab === "modi" && aiTyping ? "Memikirkan..." : "Kirim"}
+          {activeTab === "modi" && busy ? "Memikirkan..." : "Kirim"}
         </button>
       </div>
     </div>

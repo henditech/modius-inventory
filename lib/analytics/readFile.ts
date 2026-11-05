@@ -7,6 +7,7 @@
 //   npm i https://cdn.sheetjs.com/xlsx-latest/xlsx-latest.tgz
 // (kalau proyek ini sudah punya `xlsx` dari sumber itu, tidak perlu dipasang lagi)
 import * as XLSX from "xlsx";
+import { detectCsvKind, parseAdsAuto, type AdsAutoRow } from "./parseAdsAuto";
 import {
   ParseError,
   parseAds,
@@ -21,7 +22,7 @@ import {
   type WalletRow,
 } from "./parse";
 
-export type FileKind = "orders" | "income" | "wallet" | "ads";
+export type FileKind = "orders" | "income" | "wallet" | "ads" | "ads_auto";
 
 export type ReadResult =
   | { kind: "orders"; fileName: string; parsed: ParsedFile<OrderRow> }
@@ -34,21 +35,30 @@ export type ReadResult =
         balanceLast: number;
       };
     }
-  | { kind: "ads"; fileName: string; parsed: ParsedFile<AdsRow> };
+  | { kind: "ads"; fileName: string; parsed: ParsedFile<AdsRow> }
+  | {
+      kind: "ads_auto";
+      fileName: string;
+      parsed: ParsedFile<AdsAutoRow> & { fileTotal: number | null };
+    };
 
 export const KIND_LABEL: Record<FileKind, string> = {
   orders: "Pesanan",
   income: "Penghasilan",
   wallet: "Saldo",
   ads: "Iklan",
+  ads_auto: "Rincian iklan otomatis",
 };
 
 export async function readShopeeFile(file: File): Promise<ReadResult> {
   const fileName = file.name;
 
-  // Iklan: CSV
+  // Iklan: CSV (dua jenis, dibedakan lewat header)
   if (/\.csv$/i.test(fileName)) {
     const text = await file.text();
+    if (detectCsvKind(text) === "ads_auto") {
+      return { kind: "ads_auto", fileName, parsed: parseAdsAuto(text) };
+    }
     return { kind: "ads", fileName, parsed: parseAds(text) };
   }
 

@@ -21,6 +21,8 @@ export type UploadInput = {
     period: { start: string; end: string } | null;
     balanceFirst?: number;
     balanceLast?: number;
+    // hanya ads_auto: jumlah di baris total file, untuk dicocokkan dengan file iklan utama
+    fileTotal?: number | null;
   };
 };
 
@@ -88,6 +90,9 @@ export async function checkUpload(
       balanceFirst: input.parsed.balanceFirst,
       balanceLast: input.parsed.balanceLast,
     };
+  }
+  if (input.kind === "ads_auto" && typeof input.parsed.fileTotal === "number") {
+    body.fileTotal = input.parsed.fileTotal;
   }
   const r = await post(fetchFn, body);
   if (r.ok !== true) return { ok: false, error: String(r.error) };

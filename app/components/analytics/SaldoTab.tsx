@@ -34,10 +34,14 @@ const TOOLTIP_STYLE = {
   labelStyle: { color: "#8b93a1" },
 };
 
-const tickMoney = (v: number) =>
-  Math.abs(v) >= 1_000_000
-    ? `${Math.round(v / 1_000_000)} jt`
-    : `${Math.round(v / 1000)} rb`;
+// Sumbu grafik: 7.500.000 -> "7,5 jt" (bukan dibulatkan jadi "8 jt")
+const tickMoney = (v: number): string => {
+  if (Math.abs(v) >= 1_000_000) {
+    const m = v / 1_000_000;
+    return `${Number.isInteger(m) ? m : m.toFixed(1).replace(".", ",")} jt`;
+  }
+  return `${Math.round(v / 1000)} rb`;
+};
 
 function View({ d }: { d: DanaData }) {
   const w = d.wallet;

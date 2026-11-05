@@ -55,6 +55,23 @@ const deps: UploadDeps = {
     return { error: error ? error.message : null };
   },
 
+  // Hanya untuk rincian iklan otomatis: biaya Iklan Produk Otomatis di file iklan utama
+  // periode yang sama persis. null = file iklan utama periode itu belum diupload.
+  async adsAutoCompanion(storeId, start, end) {
+    const { data, error } = await analytics
+      .from("ads_report")
+      .select("product_code, cost")
+      .eq("store_id", storeId)
+      .eq("period_start", start)
+      .eq("period_end", end);
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) return { reportCost: null };
+    const reportCost = data
+      .filter((r) => r.product_code === "-")
+      .reduce((a, r) => a + Number(r.cost ?? 0), 0);
+    return { reportCost };
+  },
+
   now: () => Date.now(),
 };
 

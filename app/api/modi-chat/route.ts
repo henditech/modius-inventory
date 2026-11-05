@@ -1,5 +1,5 @@
+// app/api/modi-chat/route.ts
 import { GoogleGenAI } from "@google/genai";
-import { NextResponse } from "next/server";
 import {
   getChatHistory,
   saveChat,
@@ -58,26 +58,32 @@ Memori Percakapan
 {{LONG_TERM_MEMORY}}
 `;
 
-export const maxDuration = 30; // biar tidak kena timeout Vercel saat retry
+export const maxDuration = 30;
 
-const MODELS = [
-  "gemini-3.6-flash",
-  "gemini-3.8-flash", // model cadangan, isi dengan yang tersedia di akunmu
-];
+// Pastikan nama model ini valid di akunmu (cek di Google AI Studio).
+// Error 404 (model tidak ada) tidak akan di-retry.
+const MODELS = ["gemini-3.6-flash", "gemini-3.8-flash"];
 
-async function generateWithRetry(params: { contents: any; config: any }) {
+const MEMORY_OPEN = "<UPDATE_MEMORY>";
+const MEMORY_REGEX = /<UPDATE_MEMORY>([\s\S]*?)<\/UPDATE_MEMORY>/g;
+
+async function generateStreamWithRetry(params: { contents: any; config: any }) {
   let lastErr: any;
   for (const model of MODELS) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        return await ai.models.generateContent({ model, ...params });
+        return await ai.models.generateContentStream({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
       } catch (err: any) {
         lastErr = err;
         const retryable = err?.status === 503 || err?.status === 429;
         if (!retryable) throw err;
         console.warn(`⚠️ ${model} sibuk (percobaan ${attempt + 1})`);
         if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt)); // 1s, 2s
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
         }
       }
     }
@@ -85,29 +91,41 @@ async function generateWithRetry(params: { contents: any; config: any }) {
   throw lastErr;
 }
 
+/**
+ * Hitung sampai karakter ke berapa teks aman dikirim ke client.
+ * - Kalau tag <UPDATE_MEMORY> sudah mulai -> berhenti tepat sebelum tag.
+ * - Kalau ujung teks mirip awal tag (misal "<UPDA") -> tahan dulu,
+ *   karena bisa jadi tag-nya terpotong di antara dua chunk.
+ */
+function getSafeEnd(text: string): number {
+  const tagStart = text.indexOf(MEMORY_OPEN);
+  if (tagStart !== -1) return tagStart;
+
+  const maxHold = Math.min(MEMORY_OPEN.length - 1, text.length);
+  for (let len = maxHold; len > 0; len--) {
+    if (MEMORY_OPEN.startsWith(text.slice(-len))) {
+      return text.length - len;
+    }
+  }
+  return text.length;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const prompt = body.prompt || body.message || body.text || "";
-    const userName = body.userName || body.username || body.name || "Hendi";
+    const prompt: string = body.prompt || body.message || body.text || "";
+    const userName: string =
+      body.userName || body.username || body.name || "Hendi";
 
     const validUserName = userName.toLowerCase().includes("gita")
       ? "Kak Gita"
       : "Kak Hendi";
 
-    if (!prompt || prompt.trim() === "") {
-      return NextResponse.json(
-        { reply: "Pesan tidak boleh kosong" },
-        { status: 400 },
-      );
+    if (!prompt.trim()) {
+      return new Response("Pesan tidak boleh kosong", { status: 400 });
     }
-
     if (!process.env.GEMINI_API_KEY) {
-      console.error("❌ GEMINI_API_KEY belum terpasang!");
-      return NextResponse.json(
-        { reply: "Error: API Key belum terpasang" },
-        { status: 500 },
-      );
+      return new Response("Error: API Key belum terpasang", { status: 500 });
     }
 
     const longTermMemory = await getModiMemory();
@@ -125,80 +143,86 @@ export async function POST(req: Request) {
       role: chat.role,
       parts: [{ text: chat.content }],
     }));
-    contents.push({
-      role: "user",
-      parts: [{ text: prompt }],
-    });
+    contents.push({ role: "user", parts: [{ text: prompt }] });
 
     try {
       await saveChat(validUserName, "user", prompt);
     } catch (e) {
-      console.error("Gagal simpan user:", e);
-      return NextResponse.json(
-        { reply: "Database sibuk sebentar 😊 Coba kirim lagi ya" },
-        { status: 500 },
-      );
+      console.error("Gagal simpan pesan user:", e);
+      return new Response("Database sibuk sebentar 😊", { status: 500 });
     }
 
-    console.log("📤 Mengirim ke Gemini...");
+    const responseStream = await generateStreamWithRetry({
+      contents,
+      config: { systemInstruction, temperature: 0.7 },
+    });
 
-    // === Panggil Gemini ===
-    const result = await generateWithRetry({
-      contents: contents,
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: 0.7,
+    const encoder = new TextEncoder();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        let completeReply = "";
+        let sentLength = 0;
+
+        try {
+          // 1. Alirkan teks ke client (tanpa tag memori)
+          for await (const chunk of responseStream) {
+            if (!chunk.text) continue;
+            completeReply += chunk.text;
+
+            const safeEnd = getSafeEnd(completeReply);
+            if (safeEnd > sentLength) {
+              controller.enqueue(
+                encoder.encode(completeReply.slice(sentLength, safeEnd)),
+              );
+              sentLength = safeEnd;
+            }
+          }
+
+          // 2. Kirim sisa teks yang tadi ditahan (kalau bukan tag sungguhan)
+          const finalClean = completeReply.replace(MEMORY_REGEX, "").trim();
+          const hasOpenTag = completeReply.includes(MEMORY_OPEN);
+          if (!hasOpenTag && completeReply.length > sentLength) {
+            controller.enqueue(encoder.encode(completeReply.slice(sentLength)));
+          }
+
+          // 3. Simpan ke DB SEBELUM stream ditutup
+          //    (di serverless, kerjaan setelah close bisa terpotong)
+          try {
+            const memoryMatch = [...completeReply.matchAll(MEMORY_REGEX)][0];
+            if (memoryMatch?.[1]) {
+              const newNotes = memoryMatch[1].trim();
+              const updatedNotes = longTermMemory
+                ? `${longTermMemory}\n- ${newNotes}`.trim()
+                : `- ${newNotes}`;
+              await updateModiMemory(updatedNotes);
+            }
+            if (finalClean) {
+              await saveChat(validUserName, "model", finalClean);
+            }
+          } catch (dbErr) {
+            console.error("❌ Gagal simpan data pasca-stream:", dbErr);
+          }
+
+          controller.close();
+        } catch (err) {
+          console.error("❌ Error saat streaming:", err);
+          controller.error(err);
+        }
       },
     });
 
-    // === Baca respons dengan AMAN ===
-    let aiReply = "Maaf Kak, Modi agak linglung sebentar 😊 Bisa diulang?";
-
-    // === Baca respons dengan AMAN — sesuai SDK @google/genai ===
-    try {
-      // SDK @google/genai langsung kasih datanya, TIDAK pakai .response lagi!
-      const candidate = result.candidates?.[0]; // ❌ hapus .response di sini!
-      const text = candidate?.content?.parts?.map((p: any) => p.text).join("");
-
-      if (text && text.trim()) {
-        aiReply = text;
-      } else {
-        console.warn("⚠️ Isi respons kosong:", JSON.stringify(result, null, 2));
-      }
-    } catch (parseErr) {
-      console.error("❌ Gagal baca isi respons:", parseErr);
-    }
-
-    // === Cek memori ===
-    const memoryMatch = aiReply.match(
-      /<UPDATE_MEMORY>([\s\S]*?)<\/UPDATE_MEMORY>/,
-    );
-    if (memoryMatch?.[1]) {
-      const newNotes = memoryMatch[1].trim();
-      const updatedNotes = longTermMemory
-        ? `${longTermMemory}\n- ${newNotes}`.trim()
-        : `- ${newNotes}`;
-      await updateModiMemory(updatedNotes);
-      aiReply = aiReply
-        .replace(/<UPDATE_MEMORY>[\s\S]*?<\/UPDATE_MEMORY>/g, "")
-        .trim();
-    }
-
-    try {
-      await saveChat(validUserName, "model", aiReply);
-    } catch (e) {
-      console.error("Gagal simpan balasan:", e);
-    }
-
-    console.log("✅ Berhasil balas:", aiReply.slice(0, 50) + "...");
-
-    return NextResponse.json({ reply: aiReply });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      },
+    });
   } catch (err: any) {
     console.error("❌ Error utama:", err);
-    const status = err?.status === 503 || err?.status === 429 ? 503 : 500;
-    return NextResponse.json(
-      { reply: "Modi lagi ramai banget Kak, coba kirim lagi sebentar ya 😊" },
-      { status },
-    );
+    return new Response("Modi lagi ramai banget Kak, coba lagi ya 😊", {
+      status: 500,
+    });
   }
 }

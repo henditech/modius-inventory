@@ -7,6 +7,7 @@
 //   2. rows   : kirim baris per 500 (bisa diulang; simpan memakai upsert, tidak dobel)
 //   3. finish : catat di log upload
 import { createUploadTicket, verifyUploadTicket } from "./ticket";
+import { adsAutoCrossWarnings } from "./parseAdsAuto";
 import {
   TABLES,
   UPLOAD_KINDS,
@@ -52,6 +53,13 @@ export interface UploadDeps {
   ): Promise<{ prevBalance: number | null; nextStartBalance: number | null }>;
   insertUploadLog(entry: UploadLogEntry): Promise<{ error: string | null }>;
   now(): number;
+  // Hanya untuk ads_auto: biaya Iklan Produk Otomatis di ads_report untuk periode persis itu.
+  // reportCost null = file iklan utama periode itu belum diupload.
+  adsAutoCompanion?(
+    storeId: string,
+    start: string,
+    end: string,
+  ): Promise<{ reportCost: number | null }>;
 }
 
 export type HandlerResult = { status: number; json: Record<string, unknown> };
@@ -122,6 +130,15 @@ export async function handleUpload(
     });
     if (identity.error) return fail(409, identity.error);
     const warnings = [...identity.warnings];
+
+    // Rincian iklan otomatis: cocokkan dengan file iklan utama periode yang sama.
+    if (kind === "ads_auto" && deps.adsAutoCompanion) {
+      const p = parsePeriod(body.period);
+      if (p && p !== "invalid" && typeof body.fileTotal === "number") {
+        const c = await deps.adsAutoCompanion(store.id, p.start, p.end);
+        warnings.push(...adsAutoCrossWarnings(body.fileTotal, c.reportCost));
+      }
+    }
 
     // Saldo harus bersambung dengan data yang sudah tersimpan.
     if (kind === "wallet" && isObj(body.wallet)) {

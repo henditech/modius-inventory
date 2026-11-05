@@ -2,7 +2,15 @@
 // Pembantu tampilan untuk halaman Upload (fungsi murni, mudah diuji).
 import type { FileKind, ReadResult } from "./readFile";
 
-export const KIND_ORDER: FileKind[] = ["orders", "income", "wallet", "ads"];
+// Urutan tampil dan urutan menyimpan. "ads" harus sebelum "ads_auto": rincian iklan otomatis
+// dicocokkan dengan file iklan utama periode yang sama.
+export const KIND_ORDER: FileKind[] = [
+  "orders",
+  "income",
+  "wallet",
+  "ads",
+  "ads_auto",
+];
 
 const nf = (n: number | undefined): string =>
   Math.round(n ?? 0).toLocaleString("id-ID");
@@ -77,6 +85,13 @@ export function summaryOf(r: ReadResult): string[] {
     case "ads": {
       const i = r.parsed.info;
       return [`${nf(i.iklan)} iklan`, `Total biaya ${rp(i.total_biaya)}`];
+    }
+    case "ads_auto": {
+      const i = r.parsed.info;
+      return [
+        `${nf(i.produk)} produk (${nf(i.produk_berbiaya)} yang kena biaya)`,
+        `Total biaya ${rp(i.total_biaya)}`,
+      ];
     }
   }
 }

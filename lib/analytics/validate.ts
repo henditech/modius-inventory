@@ -3,8 +3,14 @@
 // hanya kolom yang tercantum yang diteruskan, tipenya diperiksa, dan store_id selalu
 // diisi oleh server (nilai store_id dari browser diabaikan).
 
-export type UploadKind = "orders" | "income" | "wallet" | "ads";
-export const UPLOAD_KINDS: UploadKind[] = ["orders", "income", "wallet", "ads"];
+export type UploadKind = "orders" | "income" | "wallet" | "ads" | "ads_auto";
+export const UPLOAD_KINDS: UploadKind[] = [
+  "orders",
+  "income",
+  "wallet",
+  "ads",
+  "ads_auto",
+];
 export const MAX_ROWS_PER_REQUEST = 1000;
 
 type FieldType = "text" | "num" | "int" | "date" | "ts";
@@ -126,6 +132,26 @@ export const TABLES: Record<UploadKind, TableConfig> = {
         "units_sold",
       ),
       ...opt("num", "gmv", "cost"),
+    ],
+  },
+  ads_auto: {
+    table: "ads_auto_detail",
+    onConflict: "store_id,period_start,period_end,product_code",
+    key: ["period_start", "period_end", "product_code"],
+    spec: [
+      ...req("date", "period_start", "period_end"),
+      ...req("text", "product_code"),
+      ...opt("text", "product_name"),
+      ...opt(
+        "int",
+        "impressions",
+        "clicks",
+        "conversions",
+        "conversions_direct",
+        "units_sold",
+        "units_direct",
+      ),
+      ...opt("num", "gmv", "gmv_direct", "cost"),
     ],
   },
 };

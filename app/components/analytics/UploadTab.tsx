@@ -102,6 +102,7 @@ function toInput(r: ReadResult): UploadInput {
       period: r.parsed.period,
       balanceFirst: r.kind === "wallet" ? r.parsed.balanceFirst : undefined,
       balanceLast: r.kind === "wallet" ? r.parsed.balanceLast : undefined,
+      fileTotal: r.kind === "ads_auto" ? r.parsed.fileTotal : undefined,
     },
   };
 }
@@ -402,8 +403,9 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
             Tarik file Shopee ke sini, atau klik untuk memilih
           </p>
           <p className="text-xs text-neutral-500 mt-1">
-            Pesanan, Penghasilan (Income sudah dilepas), Saldo, dan Iklan.
-            Jenisnya dikenali otomatis. Boleh beberapa file sekaligus.
+            Pesanan, Penghasilan (Income sudah dilepas), Saldo, Iklan, dan
+            Rincian Iklan Produk Otomatis. Jenisnya dikenali otomatis. Boleh
+            beberapa file sekaligus.
           </p>
           <input
             ref={inputRef}
