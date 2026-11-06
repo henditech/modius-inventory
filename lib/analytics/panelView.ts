@@ -76,13 +76,25 @@ export function countByStatus(rows: ViewRow[]): Record<Status, number> {
 const sortValue = (r: ViewRow, key: SortKey): number | null =>
   key === "gap" ? r.shownGap : (r[key] as number | null);
 
+// hideNoOrders: sembunyikan produk tanpa pesanan valid (biasanya hanya kena biaya iklan
+// otomatis kecil). Hanya berlaku di tampilan "Semua" tanpa pencarian; memilih satu status
+// atau mengetik pencarian selalu menampilkan semuanya, supaya jumlah di chip tetap sama
+// dengan baris yang tampil.
 export function filterAndSort(
   rows: ViewRow[],
-  f: { status: Status | "ALL"; query: string; key: SortKey; dir: SortDir },
+  f: {
+    status: Status | "ALL";
+    query: string;
+    key: SortKey;
+    dir: SortDir;
+    hideNoOrders?: boolean;
+  },
 ): ViewRow[] {
   const q = f.query.trim().toLowerCase();
+  const hide = !!f.hideNoOrders && f.status === "ALL" && q === "";
   const out = rows.filter(
     (r) =>
+      (!hide || r.validOrders > 0) &&
       (f.status === "ALL" || r.shownStatus === f.status) &&
       (q === "" ||
         r.productId.toLowerCase().includes(q) ||
@@ -97,6 +109,16 @@ export function filterAndSort(
     if (y == null) return -1;
     return (x - y) * sign || a.productId.localeCompare(b.productId);
   });
+}
+
+// Produk tanpa pesanan valid di periode ini: jumlahnya dan total biaya iklannya
+// (biaya itu tetap termasuk di total biaya iklan periode).
+export function noOrderStats(rows: { validOrders: number; adCost: number }[]): {
+  count: number;
+  adCost: number;
+} {
+  const e = rows.filter((r) => r.validOrders === 0);
+  return { count: e.length, adCost: e.reduce((a, r) => a + r.adCost, 0) };
 }
 
 export const daysInPeriod = (start: string, end: string): number =>

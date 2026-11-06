@@ -22,6 +22,7 @@ import {
   countByStatus,
   daysInPeriod,
   filterAndSort,
+  noOrderStats,
   parseTargetInput,
   thresholdTable,
   type SortDir,
@@ -61,6 +62,7 @@ export default function PanelTab({ currentUser }: { currentUser: string }) {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("validUnits");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [showEmpty, setShowEmpty] = useState(false); // tampilkan produk tanpa pesanan
 
   // ---------------------------------------------------------------- simpan target
   const [saveOpen, setSaveOpen] = useState(false);
@@ -164,9 +166,11 @@ export default function PanelTab({ currentUser }: { currentUser: string }) {
         query,
         key: sortKey,
         dir: sortDir,
+        hideNoOrders: !showEmpty,
       }),
-    [rows, statusFilter, query, sortKey, sortDir],
+    [rows, statusFilter, query, sortKey, sortDir, showEmpty],
   );
+  const empties = useMemo(() => noOrderStats(rows), [rows]);
   const days = full ? daysInPeriod(full.period.start, full.period.end) : 1;
   const thresholds = useMemo(
     () => (full ? thresholdTable(full.rows, days) : []),
@@ -715,6 +719,19 @@ export default function PanelTab({ currentUser }: { currentUser: string }) {
                   </tbody>
                 </table>
               </div>
+
+              {empties.count > 0 &&
+                statusFilter === "ALL" &&
+                query.trim() === "" && (
+                  <button
+                    onClick={() => setShowEmpty((v) => !v)}
+                    className="mt-3 text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    {showEmpty
+                      ? `Sembunyikan ${empties.count} produk tanpa pesanan`
+                      : `Tampilkan ${empties.count} produk tanpa pesanan (biaya iklan ${rp(empties.adCost)}, sudah termasuk di total)`}
+                  </button>
+                )}
 
               <p className="text-[11px] text-neutral-500 mt-4 leading-relaxed">
                 Urutan penilaian: <b>Rugi</b> (ada biaya iklan tapi bersih ≤ 0),
