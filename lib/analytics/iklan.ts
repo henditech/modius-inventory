@@ -57,6 +57,11 @@ export type ProductAds = {
   claimedUnits: number; // pcs klaim kedua jalur
   realUnits: number | null; // pcs valid dari pesanan (panel), kosong kalau tidak ada
   claimPct: number | null; // klaim iklan / pcs valid
+  cancelPct: number | null; // % pesanan produk ini yang batal (dari panel)
+  // Perkiraan pcs termasuk pesanan yang kemudian batal = pcs valid / (1 - batal%). Dasar yang
+  // adil untuk membandingkan klaim iklan, karena klaim Shopee bisa ikut menghitung pesanan batal.
+  // Kosong kalau tidak ada data pesanan; sama dengan pcs valid kalau persentase batal tidak ada.
+  claimBase: number | null;
   validOrders: number | null;
   avgIncome: number | null; // bersih per pcs sebelum iklan
   adCostPerUnit: number | null; // seluruh biaya iklan / pcs valid
@@ -98,7 +103,13 @@ export type IklanData = {
   channels: ChannelStat[]; // selalu dua baris: individual dan otomatis
   total: Omit<ChannelStat, "channel">; // gabungan dua jalur
   leak: { products: number; cost: number; sharePct: number | null };
-  claim: { claimedUnits: number; realUnits: number; pct: number | null };
+  claim: {
+    claimedUnits: number;
+    realUnits: number; // pcs valid
+    pct: number | null; // klaim / pcs valid
+    unitsInclCancelled: number; // perkiraan pcs termasuk yang batal
+    pctInclCancelled: number | null; // klaim / perkiraan pcs termasuk yang batal
+  };
   reading: string[];
   thresholds: {
     highAcosPct: number;
@@ -181,6 +192,18 @@ function stat(base: Base): Omit<ChannelStat, "channel"> {
     clickToUnitPct:
       base.clicks > 0 ? (100 * base.unitsSold) / base.clicks : null,
   };
+}
+
+// Perkiraan pcs termasuk pesanan batal. cancelPct dari panel dihitung per pesanan, jadi ini
+// perkiraan (pesanan batal diasumsikan sebesar pesanan valid rata-rata); sedikit berlebih kalau
+// ada pesanan "Belum Bayar", yang membuat penilaian klaim sedikit lebih longgar, bukan lebih ketat.
+export function claimBaseOf(
+  validUnits: number,
+  cancelPct: number | null,
+): number {
+  if (cancelPct == null || cancelPct <= 0 || cancelPct >= 100)
+    return validUnits;
+  return validUnits / (1 - cancelPct / 100);
 }
 
 function channelNums(
@@ -387,6 +410,8 @@ export async function handleIklan(
     const pr = panelBy.get(productId);
     const realUnits = pr ? num(pr.valid_units) : null;
     const validOrders = pr ? num(pr.valid_orders) : null;
+    const cancelPct = pr ? numOrNull(pr.cancel_pct) : null;
+    const claimBase = pr ? claimBaseOf(realUnits ?? 0, cancelPct) : null;
     const avgIncome = pr ? numOrNull(pr.avg_income) : null;
     const adCostPerUnit = pr ? numOrNull(pr.ad_cost_per_unit) : null;
     const claimedUnits = ind.units + auto.units;
@@ -424,6 +449,8 @@ export async function handleIklan(
         realUnits != null && realUnits > 0
           ? (100 * claimedUnits) / realUnits
           : null,
+      cancelPct,
+      claimBase,
       validOrders,
       avgIncome,
       adCostPerUnit,
@@ -455,6 +482,10 @@ export async function handleIklan(
   const allCost = total.cost;
   const realTotal = rowsOf(panelRes.data).reduce(
     (a, p) => a + num(p.valid_units),
+    0,
+  );
+  const realTotalAll = rowsOf(panelRes.data).reduce(
+    (a, p) => a + claimBaseOf(num(p.valid_units), numOrNull(p.cancel_pct)),
     0,
   );
 
@@ -505,6 +536,9 @@ export async function handleIklan(
       claimedUnits: total.unitsSold,
       realUnits: realTotal,
       pct: realTotal > 0 ? (100 * total.unitsSold) / realTotal : null,
+      unitsInclCancelled: realTotalAll,
+      pctInclCancelled:
+        realTotalAll > 0 ? (100 * total.unitsSold) / realTotalAll : null,
     },
     reading: readChannels(channels[0], channels[1], products),
     thresholds: {

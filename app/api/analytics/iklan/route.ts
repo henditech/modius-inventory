@@ -73,7 +73,7 @@ const deps: IklanDeps = {
     const { data, error } = await analytics
       .from("panel_product_period")
       .select(
-        "product_id, valid_orders, valid_units, avg_income, ad_cost_per_unit, net_after_ads",
+        "product_id, valid_orders, valid_units, cancel_pct, avg_income, ad_cost_per_unit, net_after_ads",
       )
       .eq("store_id", storeId)
       .eq("period_start", start)

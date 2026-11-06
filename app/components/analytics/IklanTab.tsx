@@ -11,6 +11,7 @@ import {
   FLAG_TONE,
   VERDICT_LABEL,
   VERDICT_ORDER,
+  VERDICT_RULES,
   VERDICT_TONE,
   adVerdict,
   filterCounts,
@@ -421,7 +422,7 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
                     ? "–"
                     : `${Math.round(full.claim.pct)}%`
                 }
-                sub={`${nf(full.claim.claimedUnits)} pcs diklaim iklan dari ${nf(full.claim.realUnits)} pcs valid`}
+                sub={`${nf(full.claim.claimedUnits)} pcs diklaim iklan · ${nf(full.claim.realUnits)} pcs valid (±${nf(full.claim.unitsInclCancelled)} termasuk yang batal)`}
               />
             </div>
 
@@ -629,6 +630,19 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
                 biaya di jalur itu tetapi tidak ada pcs yang diklaim. &quot;Pcs
                 nyata&quot; adalah pcs dari pesanan valid, sedangkan klaim iklan
                 bisa lebih besar karena cara Shopee mengaitkan penjualan.
+              </p>
+              <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+                <b>Vonis</b> menilai biaya iklan terhadap bersih per pcs, bukan
+                untung rugi: modal barang belum dikurangi dan target kerja tidak
+                dihitung (lihat tab Panel). <b>Data kurang</b>: biaya iklan di
+                bawah {rp(VERDICT_RULES.minCost)} atau kurang dari{" "}
+                {VERDICT_RULES.minOrders} pesanan valid.{" "}
+                <b>Pertimbangkan hentikan</b>: iklan memakan{" "}
+                {VERDICT_RULES.stopSharePct}% atau lebih dari bersih per pcs,
+                atau bersih setelah iklan nol atau rugi. <b>Pantau</b>: iklan
+                memakan {VERDICT_RULES.watchSharePct}% atau lebih, atau klaim
+                iklan lebih dari {VERDICT_RULES.claimRatio}× perkiraan pcs
+                termasuk pesanan yang batal. <b>Wajar</b>: di luar itu.
               </p>
             </Card>
 

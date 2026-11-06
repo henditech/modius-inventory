@@ -1,6 +1,12 @@
 // lib/analytics/iklanView.ts
 // Pembantu tampilan untuk tab Iklan (fungsi murni, mudah diuji).
-import type { AdFlag, ProductAds } from "./iklan";
+import {
+  HIGH_ACOS_MIN_COST,
+  HIGH_AD_SHARE_MIN_ORDERS,
+  HIGH_AD_SHARE_PCT,
+  type AdFlag,
+  type ProductAds,
+} from "./iklan";
 
 // ------------------------------------------------------------------ sorotan (flag)
 export const FLAG_LABEL: Record<AdFlag, string> = {
@@ -23,30 +29,45 @@ export const FLAG_ORDER: AdFlag[] = [
 ];
 
 // ------------------------------------------------------------------ vonis keputusan
-export type AdVerdict = "AMAN" | "PANTAU" | "HENTIKAN" | "DATA_KURANG";
+// Vonis menilai BIAYA IKLAN terhadap bersih per pcs. "Wajar" tidak berarti untung (modal barang
+// belum dikurangi) dan tidak memperhitungkan target kerja; untuk itu lihat tab Panel.
+export type AdVerdict = "WAJAR" | "PANTAU" | "HENTIKAN" | "DATA_KURANG";
 
-// Ambang ada di satu tempat supaya gampang diubah sambil belajar.
+// Ambang bersama diambil dari iklan.ts supaya sorotan dan vonis tidak bisa berbeda diam-diam.
 export const VERDICT_RULES = {
-  minCost: 100_000, // di bawah ini terlalu sedikit untuk dinilai
-  watchSharePct: 25, // iklan memakan >= 25% bersih per pcs: pantau (sama dengan HIGH_AD_SHARE_PCT di iklan.ts)
-  stopSharePct: 60, // iklan memakan >= 60% bersih per pcs: hentikan
-  claimRatio: 1.3, // klaim iklan > 1,3x pcs nyata: atribusi mencurigakan
+  minCost: HIGH_ACOS_MIN_COST, // di bawah ini terlalu sedikit untuk dinilai
+  minOrders: HIGH_AD_SHARE_MIN_ORDERS, // di bawah ini sampelnya terlalu kecil
+  watchSharePct: HIGH_AD_SHARE_PCT, // iklan memakan >= ini dari bersih per pcs: pantau
+  stopSharePct: 60, // iklan memakan >= ini: pertimbangkan hentikan
+  claimRatio: 1.3, // klaim iklan > ini x perkiraan pcs termasuk yang batal: atribusi mencurigakan
 };
 
 export const VERDICT_LABEL: Record<AdVerdict, string> = {
-  AMAN: "Aman",
+  WAJAR: "Wajar",
   PANTAU: "Pantau",
   HENTIKAN: "Pertimbangkan hentikan",
   DATA_KURANG: "Data kurang",
 };
 export const VERDICT_TONE: Record<AdVerdict, string> = {
-  AMAN: "bg-emerald-500/15 text-emerald-300",
+  WAJAR: "bg-emerald-500/15 text-emerald-300",
   PANTAU: "bg-amber-500/15 text-amber-300",
   HENTIKAN: "bg-red-500/15 text-red-300",
   DATA_KURANG: "bg-white/5 text-neutral-400",
 };
-export const VERDICT_ORDER: AdVerdict[] = ["HENTIKAN", "PANTAU", "AMAN"];
+export const VERDICT_ORDER: AdVerdict[] = ["HENTIKAN", "PANTAU", "WAJAR"];
 
+const rpText = (n: number): string =>
+  `Rp${Math.round(n).toLocaleString("id-ID")}`;
+
+// Aturan berurutan, yang pertama cocok menang:
+//   1. DATA_KURANG  biaya iklan < minCost
+//   2. DATA_KURANG  tidak ada data pesanan produk ini
+//   3. DATA_KURANG  pesanan valid < minOrders (alasannya tetap menyebut porsi iklan kalau ada)
+//   4. DATA_KURANG  bersih per pcs belum bisa dihitung (dana belum cair)
+//   5. HENTIKAN     bersih setelah iklan <= 0, atau iklan memakan >= stopSharePct
+//   6. PANTAU       iklan memakan >= watchSharePct
+//   7. PANTAU       klaim iklan > claimRatio x perkiraan pcs termasuk yang batal
+//   8. WAJAR
 export function adVerdict(p: ProductAds): {
   verdict: AdVerdict;
   reason: string;
@@ -54,17 +75,33 @@ export function adVerdict(p: ProductAds): {
   const R = VERDICT_RULES;
   const share = p.adShareOfIncomePct; // 100 = iklan menghabiskan seluruh bersih
   const net = p.netAfterAds;
+  const shareText =
+    share != null
+      ? ` (iklan memakan ${share.toFixed(0)}% dari bersih per pcs)`
+      : "";
 
   if (p.totalCost < R.minCost)
     return {
       verdict: "DATA_KURANG",
-      reason: "Biaya iklan masih kecil, belum adil dinilai",
+      reason: `Biaya iklan di bawah ${rpText(R.minCost)}, belum adil dinilai`,
+    };
+
+  if (p.validOrders == null)
+    return {
+      verdict: "DATA_KURANG",
+      reason: "Data pesanan dan penghasilan produk ini belum ada",
+    };
+
+  if (p.validOrders < R.minOrders)
+    return {
+      verdict: "DATA_KURANG",
+      reason: `Baru ${p.validOrders} pesanan valid, minimal ${R.minOrders} untuk dinilai${shareText}`,
     };
 
   if (share == null && net == null)
     return {
       verdict: "DATA_KURANG",
-      reason: "Data pesanan dan penghasilan produk ini belum ada",
+      reason: "Dana produk ini belum cair, bersih per pcs belum bisa dihitung",
     };
 
   if (net != null && net <= 0)
@@ -86,21 +123,27 @@ export function adVerdict(p: ProductAds): {
     };
 
   if (
-    p.realUnits != null &&
-    p.realUnits > 0 &&
-    p.claimedUnits > p.realUnits * R.claimRatio
+    p.claimBase != null &&
+    p.claimBase > 0 &&
+    p.claimedUnits > p.claimBase * R.claimRatio
   )
     return {
       verdict: "PANTAU",
-      reason: `Klaim iklan ${p.claimedUnits} pcs, pcs nyata hanya ${p.realUnits}`,
+      reason: `Klaim iklan ${p.claimedUnits} pcs, perkiraan pcs termasuk yang batal hanya ${Math.round(p.claimBase)}`,
     };
 
-  return { verdict: "AMAN", reason: "Iklan masih jauh dari batas impas" };
+  return {
+    verdict: "WAJAR",
+    reason:
+      share != null
+        ? `Iklan memakan ${share.toFixed(0)}% dari bersih per pcs, di bawah batas pantau ${R.watchSharePct}%`
+        : "Biaya iklan wajar terhadap bersih per pcs",
+  };
 }
 
 export function verdictCounts(rows: ProductAds[]): Record<AdVerdict, number> {
   const out: Record<AdVerdict, number> = {
-    AMAN: 0,
+    WAJAR: 0,
     PANTAU: 0,
     HENTIKAN: 0,
     DATA_KURANG: 0,
