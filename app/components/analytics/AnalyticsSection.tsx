@@ -4,13 +4,15 @@ import { useState } from "react";
 import UploadTab from "./UploadTab";
 import PenghasilanTab from "./PenghasilanTab";
 import SaldoTab from "./SaldoTab";
+import PanelTab from "./PanelTab";
 import { useDana } from "./useDana";
 
-// Tab lain (Pesanan, Iklan, Panel, Harga) ditambahkan di sini satu per satu begitu halamannya siap.
+// Tab lain (Pesanan, Iklan, Harga) ditambahkan di sini satu per satu begitu halamannya siap.
 const TABS = [
   { id: "upload", label: "Upload" },
   { id: "penghasilan", label: "Penghasilan" },
   { id: "saldo", label: "Saldo" },
+  { id: "panel", label: "Panel" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -21,8 +23,9 @@ export default function AnalyticsSection({
 }) {
   const [tab, setTab] = useState<TabId>("upload");
   // Tab Penghasilan dan Saldo berbagi pilihan toko dan rentang tanggal; data baru dimuat
-  // begitu salah satunya dibuka.
-  const dana = useDana(tab !== "upload");
+  // begitu salah satunya dibuka. Tab Panel punya pilihan toko dan periode sendiri.
+  const usesDana = tab === "penghasilan" || tab === "saldo";
+  const dana = useDana(usesDana);
 
   return (
     <div className="animate-fadeIn">
@@ -40,7 +43,7 @@ export default function AnalyticsSection({
             key={t.id}
             onClick={() => {
               setTab(t.id);
-              if (t.id !== "upload") dana.reload(); // data bisa berubah sesudah upload
+              if (t.id === "penghasilan" || t.id === "saldo") dana.reload(); // data bisa berubah sesudah upload
             }}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors shrink-0 ${
               tab === t.id
@@ -58,6 +61,7 @@ export default function AnalyticsSection({
         <PenghasilanTab dana={dana} currentUser={currentUser} />
       )}
       {tab === "saldo" && <SaldoTab dana={dana} currentUser={currentUser} />}
+      {tab === "panel" && <PanelTab currentUser={currentUser} />}
     </div>
   );
 }
