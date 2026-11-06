@@ -6,6 +6,7 @@ import PenghasilanTab from "./PenghasilanTab";
 import SaldoTab from "./SaldoTab";
 import PanelTab from "./PanelTab";
 import IklanTab from "./IklanTab";
+import PesananTab from "./PesananTab";
 import { useDana } from "./useDana";
 
 // Tab lain (Pesanan, Iklan, Harga) ditambahkan di sini satu per satu begitu halamannya siap.
@@ -15,6 +16,7 @@ const TABS = [
   { id: "saldo", label: "Saldo" },
   { id: "panel", label: "Panel" },
   { id: "iklan", label: "Iklan" },
+  { id: "pesanan", label: "Pesanan" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -65,6 +67,7 @@ export default function AnalyticsSection({
       {tab === "saldo" && <SaldoTab dana={dana} currentUser={currentUser} />}
       {tab === "panel" && <PanelTab currentUser={currentUser} />}
       {tab === "iklan" && <IklanTab currentUser={currentUser} />}
+      {tab === "pesanan" && <PesananTab currentUser={currentUser} />}
     </div>
   );
 }

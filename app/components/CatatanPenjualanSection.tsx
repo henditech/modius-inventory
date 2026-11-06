@@ -448,7 +448,7 @@ export default function CatatanPenjualanSection({
     <div className="animate-fadeIn">
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
         <span className="w-2 h-2 rounded-full bg-accent-400"></span>
-        Catatan Penjualan
+        Status Resi/Paket
       </h2>
 
       {/* Search nomor resi / nomor pesanan -- elemen paling menonjol, sesuai use case utama */}
