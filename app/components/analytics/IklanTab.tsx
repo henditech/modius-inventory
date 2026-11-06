@@ -9,8 +9,13 @@ import {
   FLAG_LABEL,
   FLAG_ORDER,
   FLAG_TONE,
+  VERDICT_LABEL,
+  VERDICT_ORDER,
+  VERDICT_TONE,
+  adVerdict,
   filterCounts,
   filterSortProducts,
+  verdictCounts,
   type IklanFilter,
   type IklanSortKey,
   type SortDir,
@@ -139,6 +144,10 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
 
   const counts = useMemo(
     () => (full ? filterCounts(full.products) : null),
+    [full],
+  );
+  const vcounts = useMemo(
+    () => (full ? verdictCounts(full.products) : null),
     [full],
   );
   const shown = useMemo(
@@ -356,7 +365,8 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
         </div>
       ) : (
         full &&
-        counts && (
+        counts &&
+        vcounts && (
           <div
             className={`space-y-5 ${loading ? "opacity-60 transition-opacity" : "transition-opacity"}`}
           >
@@ -475,6 +485,15 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
                     Dua jalur sekaligus ({counts.OVERLAP})
                   </button>
                 )}
+                {VERDICT_ORDER.filter((v) => vcounts[v] > 0).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setFilter(filter === v ? "ALL" : v)}
+                    className={chipCls(filter === v)}
+                  >
+                    {VERDICT_LABEL[v]} ({vcounts[v]})
+                  </button>
+                ))}
                 {FLAG_ORDER.filter((f) => counts[f] > 0).map((f) => (
                   <button
                     key={f}
@@ -508,73 +527,85 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
                         k="adShareOfIncomePct"
                       />
                       <Th label="Bersih/pcs setelah iklan" k="netAfterAds" />
+                      <Th label="Vonis" right={false} />
                       <Th label="Sorotan" right={false} />
                     </tr>
                   </thead>
                   <tbody>
-                    {shown.map((p) => (
-                      <tr
-                        key={p.productId}
-                        className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]"
-                      >
-                        <td className="py-2 px-3 max-w-[300px]">
-                          <p className="text-neutral-100 truncate">
-                            {p.productName ?? "(nama belum diketahui)"}
-                          </p>
-                          <p className="text-[11px] text-neutral-600">
-                            {p.productId}
-                          </p>
-                        </td>
-                        <td className="py-2 px-3 text-right">
-                          {p.ind.cost > 0 ? rp(p.ind.cost) : "–"}
-                        </td>
-                        <td className="py-2 px-3 text-right">
-                          {p.auto.cost > 0 ? rp(p.auto.cost) : "–"}
-                        </td>
-                        <td className="py-2 px-3 text-right text-neutral-400">
-                          {p.ind.cost > 0 && p.auto.cost > 0
-                            ? pct(p.autoSharePct)
-                            : p.auto.cost > 0
-                              ? "100%"
-                              : "–"}
-                        </td>
-                        <td className="py-2 px-3 text-right text-neutral-400 whitespace-nowrap">
-                          {p.ind.cost > 0 ? nf(p.ind.units) : "–"} /{" "}
-                          {p.auto.cost > 0 ? nf(p.auto.units) : "–"}
-                        </td>
-                        <td className="py-2 px-3 text-right text-neutral-400 whitespace-nowrap">
-                          {pct(p.ind.cost > 0 ? p.ind.acosPct : null)} /{" "}
-                          {pct(p.auto.cost > 0 ? p.auto.acosPct : null)}
-                        </td>
-                        <td className="py-2 px-3 text-right text-neutral-400">
-                          {p.realUnits == null ? "–" : nf(p.realUnits)}
-                        </td>
-                        <td className="py-2 px-3 text-right text-neutral-400">
-                          {pct(p.adShareOfIncomePct)}
-                        </td>
-                        <td className="py-2 px-3 text-right font-medium text-neutral-100">
-                          {p.netAfterAds == null
-                            ? "–"
-                            : rpSigned(p.netAfterAds)}
-                        </td>
-                        <td className="py-2 px-3">
-                          <div className="flex gap-1 flex-wrap">
-                            {p.flags.map((f) => (
-                              <span
-                                key={f}
-                                className={`text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${FLAG_TONE[f]}`}
-                              >
-                                {FLAG_LABEL[f]}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {shown.map((p) => {
+                      const v = adVerdict(p);
+                      return (
+                        <tr
+                          key={p.productId}
+                          className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]"
+                        >
+                          <td className="py-2 px-3 max-w-[300px]">
+                            <p className="text-neutral-100 truncate">
+                              {p.productName ?? "(nama belum diketahui)"}
+                            </p>
+                            <p className="text-[11px] text-neutral-600">
+                              {p.productId}
+                            </p>
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            {p.ind.cost > 0 ? rp(p.ind.cost) : "–"}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            {p.auto.cost > 0 ? rp(p.auto.cost) : "–"}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {p.ind.cost > 0 && p.auto.cost > 0
+                              ? pct(p.autoSharePct)
+                              : p.auto.cost > 0
+                                ? "100%"
+                                : "–"}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400 whitespace-nowrap">
+                            {p.ind.cost > 0 ? nf(p.ind.units) : "–"} /{" "}
+                            {p.auto.cost > 0 ? nf(p.auto.units) : "–"}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400 whitespace-nowrap">
+                            {pct(p.ind.cost > 0 ? p.ind.acosPct : null)} /{" "}
+                            {pct(p.auto.cost > 0 ? p.auto.acosPct : null)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {p.realUnits == null ? "–" : nf(p.realUnits)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {pct(p.adShareOfIncomePct)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-medium text-neutral-100">
+                            {p.netAfterAds == null
+                              ? "–"
+                              : rpSigned(p.netAfterAds)}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span
+                              title={v.reason}
+                              className={`text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap cursor-help ${VERDICT_TONE[v.verdict]}`}
+                            >
+                              {VERDICT_LABEL[v.verdict]}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">
+                            <div className="flex gap-1 flex-wrap">
+                              {p.flags.map((f) => (
+                                <span
+                                  key={f}
+                                  className={`text-[11px] font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${FLAG_TONE[f]}`}
+                                >
+                                  {FLAG_LABEL[f]}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {shown.length === 0 && (
                       <tr>
                         <td
-                          colSpan={10}
+                          colSpan={11}
                           className="py-6 text-center text-xs text-neutral-500"
                         >
                           Tidak ada produk yang cocok dengan filter ini.
@@ -586,7 +617,8 @@ export default function IklanTab({ currentUser }: { currentUser: string }) {
               </div>
 
               <p className="text-[11px] text-neutral-500 mt-4 leading-relaxed">
-                Sorotan adalah tanda untuk dilihat lebih dekat, bukan vonis.{" "}
+                Vonis dan sorotan adalah tanda untuk dilihat lebih dekat, bukan
+                perintah. Arahkan kursor ke badge vonis untuk melihat alasannya.{" "}
                 <b>Iklan mahal per pcs</b>: biaya iklan per pcs memakan{" "}
                 {full.thresholds.highAdSharePct}% atau lebih dari bersih per pcs
                 sebelum iklan (produk dengan minimal{" "}

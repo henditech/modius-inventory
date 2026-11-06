@@ -2,6 +2,7 @@
 // Pembantu tampilan untuk tab Iklan (fungsi murni, mudah diuji).
 import type { AdFlag, ProductAds } from "./iklan";
 
+// ------------------------------------------------------------------ sorotan (flag)
 export const FLAG_LABEL: Record<AdFlag, string> = {
   TANPA_HASIL_OTOMATIS: "Otomatis tanpa hasil",
   TANPA_HASIL_INDIVIDUAL: "Individual tanpa hasil",
@@ -21,8 +22,97 @@ export const FLAG_ORDER: AdFlag[] = [
   "TANPA_HASIL_OTOMATIS",
 ];
 
+// ------------------------------------------------------------------ vonis keputusan
+export type AdVerdict = "AMAN" | "PANTAU" | "HENTIKAN" | "DATA_KURANG";
+
+// Ambang ada di satu tempat supaya gampang diubah sambil belajar.
+export const VERDICT_RULES = {
+  minCost: 100_000, // di bawah ini terlalu sedikit untuk dinilai
+  watchSharePct: 25, // iklan memakan >= 25% bersih per pcs: pantau (sama dengan HIGH_AD_SHARE_PCT di iklan.ts)
+  stopSharePct: 60, // iklan memakan >= 60% bersih per pcs: hentikan
+  claimRatio: 1.3, // klaim iklan > 1,3x pcs nyata: atribusi mencurigakan
+};
+
+export const VERDICT_LABEL: Record<AdVerdict, string> = {
+  AMAN: "Aman",
+  PANTAU: "Pantau",
+  HENTIKAN: "Pertimbangkan hentikan",
+  DATA_KURANG: "Data kurang",
+};
+export const VERDICT_TONE: Record<AdVerdict, string> = {
+  AMAN: "bg-emerald-500/15 text-emerald-300",
+  PANTAU: "bg-amber-500/15 text-amber-300",
+  HENTIKAN: "bg-red-500/15 text-red-300",
+  DATA_KURANG: "bg-white/5 text-neutral-400",
+};
+export const VERDICT_ORDER: AdVerdict[] = ["HENTIKAN", "PANTAU", "AMAN"];
+
+export function adVerdict(p: ProductAds): {
+  verdict: AdVerdict;
+  reason: string;
+} {
+  const R = VERDICT_RULES;
+  const share = p.adShareOfIncomePct; // 100 = iklan menghabiskan seluruh bersih
+  const net = p.netAfterAds;
+
+  if (p.totalCost < R.minCost)
+    return {
+      verdict: "DATA_KURANG",
+      reason: "Biaya iklan masih kecil, belum adil dinilai",
+    };
+
+  if (share == null && net == null)
+    return {
+      verdict: "DATA_KURANG",
+      reason: "Data pesanan dan penghasilan produk ini belum ada",
+    };
+
+  if (net != null && net <= 0)
+    return {
+      verdict: "HENTIKAN",
+      reason: "Bersih per pcs setelah iklan sudah nol atau rugi",
+    };
+
+  if (share != null && share >= R.stopSharePct)
+    return {
+      verdict: "HENTIKAN",
+      reason: `Iklan memakan ${share.toFixed(0)}% dari bersih per pcs`,
+    };
+
+  if (share != null && share >= R.watchSharePct)
+    return {
+      verdict: "PANTAU",
+      reason: `Iklan memakan ${share.toFixed(0)}% dari bersih per pcs`,
+    };
+
+  if (
+    p.realUnits != null &&
+    p.realUnits > 0 &&
+    p.claimedUnits > p.realUnits * R.claimRatio
+  )
+    return {
+      verdict: "PANTAU",
+      reason: `Klaim iklan ${p.claimedUnits} pcs, pcs nyata hanya ${p.realUnits}`,
+    };
+
+  return { verdict: "AMAN", reason: "Iklan masih jauh dari batas impas" };
+}
+
+export function verdictCounts(rows: ProductAds[]): Record<AdVerdict, number> {
+  const out: Record<AdVerdict, number> = {
+    AMAN: 0,
+    PANTAU: 0,
+    HENTIKAN: 0,
+    DATA_KURANG: 0,
+  };
+  for (const p of rows) out[adVerdict(p).verdict]++;
+  return out;
+}
+
+// ------------------------------------------------------------------ filter dan urutan
+
 // "OVERLAP" = produk yang biayanya jalan di dua jalur sekaligus.
-export type IklanFilter = AdFlag | "OVERLAP" | "ALL";
+export type IklanFilter = AdFlag | AdVerdict | "OVERLAP" | "ALL";
 export type IklanSortKey =
   | "totalCost"
   | "indCost"
@@ -36,6 +126,15 @@ export type SortDir = "asc" | "desc";
 
 export const isOverlap = (p: ProductAds): boolean =>
   p.ind.cost > 0 && p.auto.cost > 0;
+
+const isVerdict = (f: IklanFilter): f is AdVerdict => f in VERDICT_LABEL;
+
+const matchFilter = (p: ProductAds, f: IklanFilter): boolean => {
+  if (f === "ALL") return true;
+  if (f === "OVERLAP") return isOverlap(p);
+  if (isVerdict(f)) return adVerdict(p).verdict === f;
+  return p.flags.includes(f);
+};
 
 const sortValue = (p: ProductAds, k: IklanSortKey): number | null => {
   switch (k) {
@@ -55,8 +154,7 @@ export function filterSortProducts(
   const q = f.query.trim().toLowerCase();
   const out = rows.filter(
     (p) =>
-      (f.filter === "ALL" ||
-        (f.filter === "OVERLAP" ? isOverlap(p) : p.flags.includes(f.filter))) &&
+      matchFilter(p, f.filter) &&
       (q === "" ||
         p.productId.toLowerCase().includes(q) ||
         (p.productName ?? "").toLowerCase().includes(q)),

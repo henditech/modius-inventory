@@ -663,7 +663,7 @@ function CatatanReturSection({ currentUser }: { currentUser: string }) {
     <div className="animate-fadeIn">
       <h2 className="text-xl font-semibold mb-6 flex items-center gap-2.5 tracking-tight">
         <span className="w-2 h-2 rounded-full bg-accent-400"></span>
-        Catatan Retur
+        Retur Diterima
       </h2>
 
       <div className="bg-panel border border-line rounded-xl p-5 mb-6 flex items-end gap-4 flex-wrap">
