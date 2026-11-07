@@ -77,6 +77,21 @@ export type ShipRow = {
   cancelPct: number | null;
 };
 export type HourRow = { hour: number; orders: number; validOrders: number };
+// COD dan Non-COD, dengan penyebab batal dipisah (lihat 09_pesanan_batal.sql).
+export type GroupRow = {
+  group: string; // "COD" atau "Non-COD"
+  orders: number;
+  validOrders: number;
+  cancelledOrders: number;
+  unpaidCancelled: number; // batal karena belum dibayar
+  failedDelivery: number; // gagal kirim (paket sudah jalan)
+  otherCancelled: number; // batal lain, biasanya sebelum kirim
+  inTransitOrders: number; // belum final
+  cancelPct: number | null; // batal / pesanan
+  cancelExUnpaidPct: number | null; // (batal - belum dibayar) / pesanan
+  failedPct: number | null; // gagal kirim / pesanan
+  validPct: number | null; // valid / pesanan
+};
 
 export type PesananData = {
   ok: true;
@@ -91,6 +106,7 @@ export type PesananData = {
   payment: PayRow[];
   shipping: ShipRow[];
   hours: HourRow[]; // selalu 24 baris, jam 0 sampai 23 (WIB)
+  groups: GroupRow[]; // kosong kalau 09_pesanan_batal.sql belum dijalankan
   reading: string[];
   warnings: string[];
 };
@@ -155,6 +171,7 @@ export function readOrders(
   actors: ActorRow[],
   payment: PayRow[],
   hours: HourRow[],
+  groups: GroupRow[] = [],
 ): string[] {
   const out: string[] = [];
   if (s.totalOrders <= 0) return out;
@@ -192,6 +209,27 @@ export function readOrders(
     );
   }
 
+  // 2b. Penyebab batal per kelompok pembayaran (butuh 09_pesanan_batal.sql).
+  const unpaidTotal = groups.reduce((a, g) => a + g.unpaidCancelled, 0);
+  if (unpaidTotal > 0) {
+    const who = groups.filter((g) => g.unpaidCancelled > 0);
+    out.push(
+      `Batal karena belum dibayar: ${nf(unpaidTotal)} pesanan${who.length === 1 ? ` (semuanya ${who[0].group})` : ""}.`,
+    );
+    const gc = groups.find((g) => g.group === "COD");
+    const gn = groups.find((g) => g.group === "Non-COD");
+    if (
+      gc &&
+      gn &&
+      gc.cancelExUnpaidPct != null &&
+      gn.cancelExUnpaidPct != null
+    ) {
+      out.push(
+        `Di luar pesanan yang tidak dibayar, batal Non-COD ${pct1(gn.cancelExUnpaidPct)} dibanding COD ${pct1(gc.cancelExUnpaidPct)}.`,
+      );
+    }
+  }
+
   // 3. Metode pembayaran dengan batal tertinggi (hanya yang cukup banyak pesanannya).
   const worst = payment
     .filter((p) => p.orders >= MIN_ORDERS_FOR_RATE && p.cancelPct != null)
@@ -202,8 +240,21 @@ export function readOrders(
     );
   }
 
-  // 4. Batal setelah resi dibuat.
-  if (s.cancelledAfterShip > 0) {
+  // 4. Gagal kirim (paket sudah jalan). Tanpa data kelompok, pakai hitungan batal setelah resi.
+  const failedGroups = groups.filter((g) => g.failedDelivery > 0);
+  if (failedGroups.length > 0) {
+    for (const g of failedGroups) {
+      out.push(
+        `Gagal kirim di ${g.group}: ${nf(g.failedDelivery)} pesanan (${pct1(g.failedPct ?? 0)} dari pesanan ${g.group}).`,
+      );
+    }
+    for (const g of failedGroups) {
+      if (g.inTransitOrders > 0)
+        out.push(
+          `Di ${g.group} masih ada ${nf(g.inTransitOrders)} pesanan dalam pengiriman, jadi angka gagal kirim masih bisa naik.`,
+        );
+    }
+  } else if (s.cancelledAfterShip > 0) {
     out.push(
       `${nf(s.cancelledAfterShip)} pesanan batal setelah nomor resi dibuat (paket sudah diproses kirim).`,
     );
@@ -282,6 +333,8 @@ export async function handlePesanan(
     deps.rpc("orders_by_shipping", a),
     deps.rpc("orders_by_hour", a),
   ]);
+  // Fungsi ini baru (09_pesanan_batal.sql). Kalau belum dijalankan, tab tetap tampil tanpa kartunya.
+  const groupsCall = await deps.rpc("orders_cancel_groups", a);
   const failed = calls.find((x) => x.error);
   if (failed) return fail(500, `Gagal membaca data: ${failed.error}`);
   const [sum, daily, status, reasons, pay, ship, hours] = calls.map(
@@ -413,6 +466,32 @@ export async function handlePesanan(
     })
     .sort((x, y) => y.orders - x.orders || x.service.localeCompare(y.service));
 
+  // ---- COD dan Non-COD dengan penyebab batal
+  const groups: GroupRow[] = groupsCall.error
+    ? []
+    : rowsOf(groupsCall.data)
+        .map((x) => {
+          const orders = num(x.orders);
+          const cancelled = num(x.cancelled_orders);
+          const unpaid = num(x.unpaid_cancelled);
+          const failedDel = num(x.failed_delivery);
+          return {
+            group: str(x.grp) ?? "-",
+            orders,
+            validOrders: num(x.valid_orders),
+            cancelledOrders: cancelled,
+            unpaidCancelled: unpaid,
+            failedDelivery: failedDel,
+            otherCancelled: num(x.other_cancelled),
+            inTransitOrders: num(x.in_transit_orders),
+            cancelPct: pctOf(cancelled, orders),
+            cancelExUnpaidPct: pctOf(cancelled - unpaid, orders),
+            failedPct: pctOf(failedDel, orders),
+            validPct: pctOf(num(x.valid_orders), orders),
+          };
+        })
+        .sort((x, y) => y.orders - x.orders || x.group.localeCompare(y.group));
+
   // ---- per jam: selalu 24 baris
   const byHour = new Map<number, HourRow>();
   for (const x of rowsOf(hours)) {
@@ -431,6 +510,10 @@ export async function handlePesanan(
 
   // ---- peringatan
   const warnings: string[] = [];
+  if (groupsCall.error)
+    warnings.push(
+      `Rincian batal per jenis pembayaran belum tersedia (jalankan 09_pesanan_batal.sql di Supabase). Pesan dari database: ${groupsCall.error}`,
+    );
   if (range.to > ordersLast)
     warnings.push(
       `Data pesanan baru sampai ${fmtDate(ordersLast)}. Angka sesudah tanggal itu belum lengkap.`,
@@ -468,7 +551,8 @@ export async function handlePesanan(
     payment,
     shipping,
     hours: hoursOut,
-    reading: readOrders(summary, actors, payment, hoursOut),
+    groups,
+    reading: readOrders(summary, actors, payment, hoursOut, groups),
     warnings,
   };
   return { status: 200, json: data };

@@ -29,6 +29,7 @@ import { Card, Stat } from "./ui";
 
 type StoreOpt = { id: string; code: string; name: string };
 
+const HOUR_AREA_PX = 144; // tinggi area grafik jam
 const PRESETS: Preset[] = ["7d", "30d", "thisMonth", "lastMonth", "all"];
 const nf = (n: number): string => Math.round(n).toLocaleString("id-ID");
 const pct = (n: number | null): string =>
@@ -413,7 +414,7 @@ export default function PesananTab({ currentUser }: { currentUser: string }) {
               </div>
             </Card>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
               {/* Status */}
               <Card
                 title="Status pesanan"
@@ -514,7 +515,89 @@ export default function PesananTab({ currentUser }: { currentUser: string }) {
               </Card>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+            {/* Penyebab batal per jenis pembayaran */}
+            {full.groups.length > 0 && (
+              <Card
+                title="Batal per jenis pembayaran"
+                subtitle="Dipisah menurut penyebabnya, supaya pesanan yang tidak dibayar tidak tercampur dengan paket yang gagal terkirim."
+              >
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm tabular-nums">
+                    <thead>
+                      <tr className="border-b border-line">
+                        <Th label="Jenis" right={false} />
+                        <Th label="Pesanan" />
+                        <Th label="Valid" />
+                        <Th label="Batal" />
+                        <Th label="% batal" />
+                        <Th label="Belum dibayar" />
+                        <Th label="Gagal kirim" />
+                        <Th label="Batal lain" />
+                        <Th label="% batal tanpa belum dibayar" />
+                        <Th label="Masih dikirim" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {full.groups.map((g) => (
+                        <tr
+                          key={g.group}
+                          className="border-b border-white/5 last:border-0"
+                        >
+                          <td className="py-2 px-3 text-neutral-100">
+                            {g.group}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            {nf(g.orders)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {nf(g.validOrders)} ({pct(g.validPct)})
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {nf(g.cancelledOrders)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-medium text-neutral-100">
+                            {pct(g.cancelPct)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {g.unpaidCancelled > 0
+                              ? nf(g.unpaidCancelled)
+                              : "–"}
+                          </td>
+                          <td
+                            className={`py-2 px-3 text-right ${g.failedDelivery > 0 ? "text-amber-400" : "text-neutral-400"}`}
+                          >
+                            {g.failedDelivery > 0
+                              ? `${nf(g.failedDelivery)} (${pct(g.failedPct)})`
+                              : "–"}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {g.otherCancelled > 0 ? nf(g.otherCancelled) : "–"}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {pct(g.cancelExUnpaidPct)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-neutral-400">
+                            {g.inTransitOrders > 0
+                              ? nf(g.inTransitOrders)
+                              : "–"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-neutral-500 mt-3 leading-relaxed">
+                  <b>Belum dibayar</b>: dibatalkan otomatis karena tidak dibayar
+                  (hanya mungkin untuk Non-COD). <b>Gagal kirim</b>: paket sudah
+                  jalan tetapi tidak sampai (persen dari pesanan jenis itu).{" "}
+                  <b>Batal lain</b>: dibatalkan pembeli, penjual, atau sistem,
+                  biasanya sebelum kirim. Pesanan yang masih dikirim belum
+                  final, jadi gagal kirim masih bisa bertambah.
+                </p>
+              </Card>
+            )}
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
               {/* Pembayaran */}
               <Card
                 title="Metode pembayaran"
@@ -634,17 +717,23 @@ export default function PesananTab({ currentUser }: { currentUser: string }) {
               title="Pesanan per jam"
               subtitle="Jam pesanan dibuat (WIB), dijumlahkan seluruh hari di rentang. Arahkan kursor ke batang untuk angkanya."
             >
-              <div className="flex items-end gap-1 h-36">
+              <div
+                className="flex items-end gap-1"
+                style={{ height: HOUR_AREA_PX }}
+              >
                 {bars.map((b) => (
                   <div
                     key={b.hour}
-                    className="flex-1 flex flex-col items-center justify-end h-full"
+                    className="flex-1 flex items-end h-full"
                     title={`${hourLabel(b.hour)}: ${nf(b.orders)} pesanan`}
                   >
                     <div
-                      className="w-full rounded-t bg-accent-500/70 hover:bg-accent-400 transition-colors"
+                      className="w-full rounded-t bg-accent-500 opacity-70 hover:opacity-100 transition-opacity"
                       style={{
-                        height: `${Math.max(b.heightPct, b.orders > 0 ? 2 : 0)}%`,
+                        height: Math.max(
+                          Math.round((b.heightPct * HOUR_AREA_PX) / 100),
+                          b.orders > 0 ? 3 : 0,
+                        ),
                       }}
                     />
                   </div>
