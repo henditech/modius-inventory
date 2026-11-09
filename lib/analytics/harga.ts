@@ -11,6 +11,8 @@ import type { StoreRow } from "./uploadHandler";
 
 // Pita lain dianggap lebih baik kalau bersih per hari-nya lebih tinggi sekurang-kurangnya ini.
 export const BETTER_BAND_MIN_GAIN_PCT = 10;
+// Pita hanya dibandingkan kalau dananya sudah cair sekurang-kurangnya ini (persen dari pcs valid).
+export const MIN_RELEASED_PCT = 50;
 
 export type StoreRef = { id: string; code: string; name: string };
 
@@ -28,6 +30,8 @@ export type Band = {
   unitsPerDay: number | null; // permintaan per hari terjual
   avgIncome: number | null; // bersih per pcs sebelum iklan
   releasedOrders: number;
+  releasedPct: number | null; // perkiraan dana cair: pesanan cair / pcs valid, maksimum 100
+  comparable: boolean; // dana cair minimal MIN_RELEASED_PCT
   estNetPerDay: number | null; // pcs valid per hari x bersih per pcs, sebelum iklan
   enoughData: boolean; // minimal 3 hari dan 10 pesanan
   isCurrent: boolean; // pita yang terakhir dipakai
@@ -59,8 +63,14 @@ export type HargaData = {
     multiBand: number;
     withHint: number;
     bandsWithoutIncome: number;
+    bandsLowFunds: number;
   };
-  rules: { minDays: number; minOrders: number; minGainPct: number };
+  rules: {
+    minDays: number;
+    minOrders: number;
+    minGainPct: number;
+    minReleasedPct: number;
+  };
   warnings: string[];
 };
 export type HargaEmpty = { ok: true; empty: true; store: StoreRef };
@@ -115,7 +125,9 @@ export function currentBandOf(bands: Band[]): Band | null {
 // Pita terbaik = bersih per hari tertinggi di antara pita yang cukup datanya. Hanya ada kalau
 // minimal dua pita yang cukup datanya (kalau tidak, tidak ada yang bisa dibandingkan).
 export function bestBandOf(bands: Band[]): Band | null {
-  const ok = bands.filter((b) => b.enoughData && b.estNetPerDay != null);
+  const ok = bands.filter(
+    (b) => b.enoughData && b.comparable && b.estNetPerDay != null,
+  );
   if (ok.length < 2) return null;
   return [...ok].sort(
     (a, b) =>
@@ -158,6 +170,13 @@ export async function handleHarga(
       name: str(x.product_name),
       bands: [],
     };
+
+    const validUnits = num(x.valid_units);
+    const releasedOrders = num(x.released_orders);
+    const releasedPct =
+      validUnits > 0
+        ? Math.min(100, (100 * releasedOrders) / validUnits)
+        : null;
     cur.bands.push({
       priceBand: num(x.price_band),
       priceMin: num(x.price_min),
@@ -167,11 +186,13 @@ export async function handleHarga(
       daysSold: num(x.days_sold),
       allOrders: num(x.all_orders),
       allUnits: num(x.all_units),
-      validUnits: num(x.valid_units),
+      validUnits,
+      releasedOrders,
+      releasedPct,
+      comparable: releasedPct != null && releasedPct >= MIN_RELEASED_PCT,
       cancelPct: numOrNull(x.cancel_pct),
       unitsPerDay: numOrNull(x.units_per_day),
       avgIncome: numOrNull(x.avg_income),
-      releasedOrders: num(x.released_orders),
       estNetPerDay: numOrNull(x.est_net_per_day),
       enoughData: x.enough_data === true,
       isCurrent: false,
@@ -182,6 +203,7 @@ export async function handleHarga(
 
   const products: ProductPrice[] = [];
   let bandsWithoutIncome = 0;
+  let bandsLowFunds = 0;
   for (const [productId, p] of byProduct) {
     const bands = p.bands.sort((a, b) => a.priceBand - b.priceBand);
     const current = currentBandOf(bands);
@@ -189,6 +211,7 @@ export async function handleHarga(
     if (current) current.isCurrent = true;
     if (best) best.isBest = true;
     bandsWithoutIncome += bands.filter((b) => b.avgIncome == null).length;
+    bandsLowFunds += bands.filter((b) => !b.comparable).length;
 
     let hint: PriceHint | null = null;
     if (
@@ -196,6 +219,7 @@ export async function handleHarga(
       best &&
       best.priceBand !== current.priceBand &&
       current.enoughData &&
+      current.comparable &&
       current.estNetPerDay != null &&
       current.estNetPerDay > 0 &&
       best.estNetPerDay != null
@@ -229,6 +253,10 @@ export async function handleHarga(
     warnings.push(
       `${nf(bandsWithoutIncome)} pita harga belum punya pesanan yang dananya cair, jadi bersih per pcs dan per hari-nya kosong.`,
     );
+  if (bandsLowFunds > 0)
+    warnings.push(
+      `${nf(bandsLowFunds)} pita harga dananya baru cair kurang dari ${MIN_RELEASED_PCT}%, jadi tidak dibandingkan dan tidak dipakai untuk saran harga.`,
+    );
 
   const data: HargaData = {
     ok: true,
@@ -240,8 +268,14 @@ export async function handleHarga(
       multiBand: products.filter((p) => p.multiBand).length,
       withHint: products.filter((p) => p.hint != null).length,
       bandsWithoutIncome,
+      bandsLowFunds,
     },
-    rules: { minDays: 3, minOrders: 10, minGainPct: BETTER_BAND_MIN_GAIN_PCT },
+    rules: {
+      minDays: 3,
+      minOrders: 10,
+      minGainPct: BETTER_BAND_MIN_GAIN_PCT,
+      minReleasedPct: MIN_RELEASED_PCT,
+    },
     warnings,
   };
   return { status: 200, json: data };

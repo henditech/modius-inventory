@@ -205,9 +205,9 @@ export default function HargaTab({ currentUser }: { currentUser: string }) {
             Harga dikelompokkan per pita Rp5.000 dari semua pesanan yang
             tersimpan. <b>Pcs</b> adalah permintaan (termasuk yang kemudian
             batal). <b>Bersih per pcs</b> adalah sebelum iklan dan modal barang,
-            dari pesanan yang dananya sudah cair. Membandingkan harga di sini
-            hanya membandingkan periode yang berurutan, bukan percobaan
-            terkontrol: promo, iklan, dan hari ramai ikut memengaruhi.
+            dari pesanan yang dananya sudah cair. <b>Dana cair</b> adalah
+            perkiraan bagian pcs valid yang dananya sudah masuk; pita di bawah{" "}
+            {full.rules.minReleasedPct}% tidak dibandingkan.
           </p>
         )}
       </div>
@@ -334,6 +334,7 @@ export default function HargaTab({ currentUser }: { currentUser: string }) {
                           <Th label="Pcs" />
                           <Th label="Pcs/hari" />
                           <Th label="% batal" />
+                          <Th label="Dana cair" />
                           <Th label="Bersih/pcs" />
                           <Th label="Bersih/hari" />
                           <Th label="" right={false} />
@@ -344,7 +345,7 @@ export default function HargaTab({ currentUser }: { currentUser: string }) {
                           <tr
                             key={b.priceBand}
                             className={`border-b border-white/5 last:border-0 ${
-                              b.enoughData ? "" : "opacity-60"
+                              b.enoughData && b.comparable ? "" : "opacity-60"
                             }`}
                           >
                             <td className="py-2 px-3 text-neutral-100 whitespace-nowrap">
@@ -364,6 +365,15 @@ export default function HargaTab({ currentUser }: { currentUser: string }) {
                             </td>
                             <td className="py-2 px-3 text-right text-neutral-400">
                               {pct(b.cancelPct)}
+                            </td>
+                            <td
+                              className={`py-2 px-3 text-right ${
+                                b.comparable
+                                  ? "text-neutral-400"
+                                  : "text-amber-300"
+                              }`}
+                            >
+                              {pct(b.releasedPct)}
                             </td>
                             <td className="py-2 px-3 text-right text-neutral-400">
                               {rpOrDash(b.avgIncome)}
@@ -392,6 +402,11 @@ export default function HargaTab({ currentUser }: { currentUser: string }) {
                                 {!b.enoughData && (
                                   <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-white/5 text-neutral-400">
                                     Data sedikit
+                                  </span>
+                                )}
+                                {!b.comparable && (
+                                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300">
+                                    Dana cair sedikit
                                   </span>
                                 )}
                               </div>
