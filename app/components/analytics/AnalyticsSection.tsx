@@ -7,7 +7,7 @@ import SaldoTab from "./SaldoTab";
 import PanelTab from "./PanelTab";
 import IklanTab from "./IklanTab";
 import PesananTab from "./PesananTab";
-import HargaTab from "./Hargatab";
+import HargaTab from "./HargaTab";
 import { useDana } from "./useDana";
 
 // Tab lain (Pesanan, Iklan, Harga) ditambahkan di sini satu per satu begitu halamannya siap.
