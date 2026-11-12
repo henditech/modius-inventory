@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import {
   KIND_LABEL,
-  readShopeeFile,
+  readUploadFile,
   type FileKind,
   type ReadResult,
 } from "@/lib/analytics/readFile";
@@ -32,7 +32,7 @@ import {
   type UploadInput,
 } from "@/lib/analytics/uploadClient";
 import {
-  KIND_ORDER,
+  KINDS_OF,
   daysSince,
   periodLabel,
   sortForSaving,
@@ -53,6 +53,7 @@ type StoreInfo = {
   id: string;
   code: string;
   name: string;
+  marketplace: "shopee" | "tiktok";
   username: string | null;
   last: Record<FileKind, LastUpload | null>;
 };
@@ -132,7 +133,8 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
 
   const loadMe = useCallback(async () => {
     try {
-      const res = await fetch("/api/analytics/me");
+      // scope=upload: halaman ini menampilkan toko Shopee dan TikTok; tab lain tetap Shopee saja.
+      const res = await fetch("/api/analytics/me?scope=upload");
       if (res.status === 401) {
         setSessionExpired(true);
         return;
@@ -187,21 +189,43 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
       return;
     }
     try {
-      const result = await readShopeeFile(file);
+      // Satu file bisa menghasilkan beberapa jenis data (income TikTok = penghasilan + dana).
+      const results = await readUploadFile(file);
       const sid = storeRef.current;
+      const startStatus: Status = sid ? "checking" : "need_store";
+      const [firstResult, ...rest] = results;
       patch(id, {
-        result,
-        parserWarnings: result.parsed.warnings,
-        status: sid ? "checking" : "need_store",
+        result: firstResult,
+        parserWarnings: firstResult.parsed.warnings,
+        status: startStatus,
       });
-      if (sid) await runCheck(id, result, sid);
+      const extra = rest.map((r) => ({ id: `f${++seq.current}`, result: r }));
+      if (extra.length > 0) {
+        setItems((prev) => [
+          ...prev,
+          ...extra.map(
+            (x): Item => ({
+              id: x.id,
+              file,
+              status: startStatus,
+              result: x.result,
+              parserWarnings: x.result.parsed.warnings,
+              serverWarnings: [],
+            }),
+          ),
+        ]);
+      }
+      if (sid) {
+        await runCheck(id, firstResult, sid);
+        for (const x of extra) await runCheck(x.id, x.result, sid);
+      }
     } catch (e) {
       patch(id, {
         status: "unreadable",
         error:
           e instanceof ParseError
             ? e.message
-            : "File tidak bisa dibuka. Pastikan ini file asli dari Shopee dan belum diubah.",
+            : "File tidak bisa dibuka. Pastikan ini file asli dari Shopee atau TikTok Shop dan belum diubah.",
       });
     }
   }
@@ -330,7 +354,7 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
   if (stores.length === 0) {
     return (
       <div className="bg-panel border border-line rounded-xl p-5 text-sm text-neutral-400 max-w-xl">
-        Belum ada toko Shopee yang kamu kelola di sistem.
+        Belum ada toko Shopee atau TikTok yang kamu kelola di sistem.
       </div>
     );
   }
@@ -359,10 +383,11 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
             {stores.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} ({s.code})
+                {s.marketplace === "tiktok" ? " · TikTok" : " · Shopee"}
               </option>
             ))}
           </select>
-          {store && (
+          {store && store.marketplace === "shopee" && (
             <p className="text-[11px] mt-2 text-neutral-500">
               {store.username ? (
                 <>
@@ -375,6 +400,12 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
                   belum bisa dicocokkan otomatis.
                 </span>
               )}
+            </p>
+          )}
+          {store && store.marketplace === "tiktok" && (
+            <p className="text-[11px] mt-2 text-amber-400">
+              File TikTok Shop tidak memuat identitas toko. Pastikan toko yang
+              dipilih sudah benar sebelum menyimpan.
             </p>
           )}
         </div>
@@ -400,11 +431,12 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
             className="mx-auto mb-2 text-neutral-500"
           />
           <p className="text-sm text-neutral-300">
-            Tarik file Shopee ke sini, atau klik untuk memilih
+            Tarik file Shopee atau TikTok Shop ke sini, atau klik untuk memilih
           </p>
           <p className="text-xs text-neutral-500 mt-1">
-            Pesanan, Penghasilan (Income sudah dilepas), Saldo, Iklan, dan
-            Rincian Iklan Produk Otomatis. Jenisnya dikenali otomatis. Boleh
+            Shopee: Pesanan, Penghasilan (Income sudah dilepas), Saldo, Iklan,
+            dan Rincian Iklan Produk Otomatis. TikTok Shop: Semua pesanan,
+            income, dan Campaign overview. Jenisnya dikenali otomatis. Boleh
             beberapa file sekaligus.
           </p>
           <input
@@ -588,7 +620,7 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
         </p>
         {store ? (
           <div className="space-y-3">
-            {KIND_ORDER.map((k) => {
+            {KINDS_OF[store.marketplace].map((k) => {
               const l = store.last[k];
               const age = l ? daysSince(l.period_end) : null;
               return (

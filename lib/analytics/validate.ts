@@ -3,17 +3,49 @@
 // hanya kolom yang tercantum yang diteruskan, tipenya diperiksa, dan store_id selalu
 // diisi oleh server (nilai store_id dari browser diabaikan).
 
-export type UploadKind = "orders" | "income" | "wallet" | "ads" | "ads_auto";
+export type UploadKind =
+  | "orders"
+  | "income"
+  | "wallet"
+  | "ads"
+  | "ads_auto"
+  | "tt_orders"
+  | "tt_income"
+  | "tt_wallet"
+  | "tt_ads";
 export const UPLOAD_KINDS: UploadKind[] = [
   "orders",
   "income",
   "wallet",
   "ads",
   "ads_auto",
+  "tt_orders",
+  "tt_income",
+  "tt_wallet",
+  "tt_ads",
 ];
 export const MAX_ROWS_PER_REQUEST = 1000;
 
-type FieldType = "text" | "num" | "int" | "date" | "ts";
+// Tiap jenis file hanya boleh masuk ke toko di marketplace-nya.
+export type Marketplace = "shopee" | "tiktok";
+export const MARKETPLACE_OF: Record<UploadKind, Marketplace> = {
+  orders: "shopee",
+  income: "shopee",
+  wallet: "shopee",
+  ads: "shopee",
+  ads_auto: "shopee",
+  tt_orders: "tiktok",
+  tt_income: "tiktok",
+  tt_wallet: "tiktok",
+  tt_ads: "tiktok",
+};
+export const MARKETPLACE_LABEL: Record<Marketplace, string> = {
+  shopee: "Shopee",
+  tiktok: "TikTok",
+};
+
+// "json" = objek berisi angka saja (mis. rincian biaya TikTok yang jenisnya bisa bertambah).
+type FieldType = "text" | "num" | "int" | "date" | "ts" | "json";
 type Spec = { f: string; t: FieldType; req?: boolean };
 
 const req = (t: FieldType, ...fs: string[]): Spec[] =>
@@ -154,6 +186,122 @@ export const TABLES: Record<UploadKind, TableConfig> = {
       ...opt("num", "gmv", "gmv_direct", "cost"),
     ],
   },
+
+  // ------------------------------------------------------------ TikTok (11_tiktok_schema.sql)
+  // has_tracking dan is_cod di tt_orders dihitung database: sengaja tidak ada di sini.
+  tt_orders: {
+    table: "tt_orders",
+    onConflict: "store_id,order_id,sku_id",
+    key: ["order_id", "sku_id"],
+    spec: [
+      ...req("text", "order_id", "sku_id", "product_name", "status"),
+      ...opt(
+        "text",
+        "seller_sku",
+        "variation",
+        "substatus",
+        "cancel_type",
+        "cancel_by",
+        "cancel_reason",
+        "tracking_id",
+        "delivery_option",
+        "shipping_provider",
+        "payment_method",
+        "category",
+        "package_id",
+        "purchase_channel",
+        "order_channel",
+        "creator_handle",
+      ),
+      ...req("int", "qty", "returned_qty"),
+      ...opt(
+        "num",
+        "list_price",
+        "subtotal_before",
+        "platform_discount",
+        "seller_discount",
+        "subtotal_after",
+        "shipping_fee_original",
+        "shipping_platform_discount",
+        "shipping_seller_discount",
+        "refund_amount",
+        "order_amount",
+      ),
+      ...req("ts", "created_at"),
+      ...opt(
+        "ts",
+        "paid_at",
+        "rts_at",
+        "shipped_at",
+        "delivered_at",
+        "cancelled_at",
+      ),
+    ],
+  },
+  tt_income: {
+    table: "tt_income_lines",
+    onConflict: "store_id,entry_id,paid_on",
+    key: ["entry_id", "paid_on"],
+    spec: [
+      ...req("text", "entry_id", "txn_type"),
+      ...opt("text", "related_order_id", "source"),
+      ...opt("date", "ordered_on"),
+      ...req("date", "paid_on"),
+      ...req(
+        "num",
+        "settlement",
+        "revenue",
+        "subtotal_after",
+        "subtotal_before",
+        "seller_discount",
+        "refund_after",
+        "refund_before",
+        "refund_seller_discount",
+        "total_fee",
+        "fee_commission",
+        "fee_payment",
+        "shipping_net",
+        "fee_affiliate",
+        "fee_affiliate_ads",
+        "fee_dynamic",
+        "fee_growth_xtra",
+        "fee_processing",
+        "tax_pph22",
+        "fee_gmv_max",
+        "adjustment",
+        "buyer_paid",
+        "buyer_refund",
+        "platform_discount",
+        "platform_discount_refund",
+        "seller_voucher",
+        "seller_voucher_refund",
+      ),
+      ...req("json", "fee_other", "shipping_detail"),
+    ],
+  },
+  tt_wallet: {
+    table: "tt_wallet",
+    onConflict: "store_id,ref_id",
+    key: ["ref_id"],
+    spec: [
+      ...req("text", "ref_id", "txn_type"),
+      ...req("date", "requested_on"),
+      ...req("num", "amount"),
+      ...opt("text", "status"),
+      ...opt("date", "done_on"),
+    ],
+  },
+  tt_ads: {
+    table: "tt_ads_daily",
+    onConflict: "store_id,day",
+    key: ["day"],
+    spec: [
+      ...req("date", "day"),
+      ...req("num", "cost", "gross_revenue"),
+      ...req("int", "sku_orders"),
+      ...opt("num", "roi"),
+    ],
+  },
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -193,6 +341,18 @@ function checkValue(
         !Number.isNaN(Date.parse(v))
         ? null
         : "harus waktu ISO";
+    case "json": {
+      if (typeof v !== "object" || v === null || Array.isArray(v))
+        return "harus objek";
+      const entries = Object.entries(v as Record<string, unknown>);
+      if (entries.length > 100) return "isinya terlalu banyak";
+      for (const [k, x] of entries) {
+        if (k.length > 200) return "nama isi terlalu panjang";
+        if (typeof x !== "number" || !Number.isFinite(x) || Math.abs(x) >= 1e15)
+          return "hanya boleh berisi angka";
+      }
+      return null;
+    }
   }
 }
 
@@ -266,6 +426,14 @@ export function checkStoreIdentity(
   if (kind === "orders") {
     warnings.push(
       "File pesanan tidak memuat identitas toko, jadi tidak bisa dicek otomatis. Pastikan toko yang dipilih benar.",
+    );
+    return { warnings };
+  }
+
+  // File TikTok (pesanan, income, Campaign overview) tidak memuat identitas toko sama sekali.
+  if (MARKETPLACE_OF[kind] === "tiktok") {
+    warnings.push(
+      "File TikTok tidak memuat identitas toko, jadi tidak bisa dicek otomatis. Pastikan toko yang dipilih benar.",
     );
     return { warnings };
   }

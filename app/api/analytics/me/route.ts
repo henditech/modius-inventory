@@ -1,6 +1,10 @@
 // app/api/analytics/me/route.ts
-// Siapa yang login (dari cookie bertanda tangan), toko Shopee yang dia kelola, dan
-// upload terakhir per jenis file untuk tiap toko. Dipakai halaman Analytics.
+// Siapa yang login (dari cookie bertanda tangan), toko yang dia kelola, dan upload terakhir
+// per jenis file untuk tiap toko. Dipakai halaman Analytics.
+//
+// Tanpa parameter: hanya toko Shopee (dipakai tab Penghasilan, Saldo, Panel, Iklan, Pesanan,
+// Harga Shopee). ?scope=upload: toko Shopee dan TikTok (halaman Upload). ?scope=tiktok: hanya
+// toko TikTok (tab TikTok).
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getAdminFromRequest } from "@/lib/session";
@@ -14,6 +18,7 @@ type StoreRow = {
   id: string;
   name: string;
   code: string;
+  marketplace: string;
   marketplace_username: string | null;
 };
 
@@ -26,11 +31,20 @@ export async function GET(req: Request) {
     );
   }
 
+  const scope = new URL(req.url).searchParams.get("scope");
+  const marketplaces =
+    scope === "upload"
+      ? ["shopee", "tiktok"]
+      : scope === "tiktok"
+        ? ["tiktok"]
+        : ["shopee"];
+
   const { data: stores, error } = await supabaseAdmin
     .from("stores")
-    .select("id, name, code, marketplace_username")
+    .select("id, name, code, marketplace, marketplace_username")
     .eq("managed_by", admin)
-    .eq("marketplace", "shopee")
+    .in("marketplace", marketplaces)
+    .order("marketplace")
     .order("code");
   if (error) {
     return NextResponse.json(
@@ -51,7 +65,7 @@ export async function GET(req: Request) {
       )
       .in("store_id", ids)
       .order("uploaded_at", { ascending: false })
-      .limit(300);
+      .limit(500);
     logs = (res.data ?? []) as UploadLogRow[];
   }
   const latest = latestPerStoreKind(logs);
@@ -63,6 +77,7 @@ export async function GET(req: Request) {
       id: s.id,
       code: s.code,
       name: s.name,
+      marketplace: s.marketplace,
       username: s.marketplace_username,
       last: Object.fromEntries(
         UPLOAD_KINDS.map((k) => [k, latest.get(`${s.id}|${k}`) ?? null]),

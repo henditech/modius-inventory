@@ -72,6 +72,52 @@ const deps: UploadDeps = {
     return { reportCost };
   },
 
+  // TikTok: berapa dari nomor pesanan sampel yang sudah tercatat di toko LAIN, dan toko mana.
+  async ttIdsInOtherStores(kind, storeId, ids) {
+    const hit = new Set<string>();
+    const otherStores = new Set<string>();
+    if (kind === "tt_orders") {
+      const { data, error } = await analytics
+        .from("tt_orders")
+        .select("order_id, store_id")
+        .in("order_id", ids)
+        .neq("store_id", storeId)
+        .limit(1000);
+      if (error) throw new Error(error.message);
+      for (const r of (data ?? []) as {
+        order_id: string;
+        store_id: string;
+      }[]) {
+        hit.add(String(r.order_id));
+        otherStores.add(String(r.store_id));
+      }
+    } else {
+      const { data, error } = await analytics
+        .from("tt_income_lines")
+        .select("entry_id, store_id")
+        .in("entry_id", ids)
+        .neq("store_id", storeId)
+        .limit(1000);
+      if (error) throw new Error(error.message);
+      for (const r of (data ?? []) as {
+        entry_id: string;
+        store_id: string;
+      }[]) {
+        hit.add(String(r.entry_id));
+        otherStores.add(String(r.store_id));
+      }
+    }
+    let storeCodes: string[] = [];
+    if (otherStores.size > 0) {
+      const { data } = await supabaseAdmin
+        .from("stores")
+        .select("code")
+        .in("id", [...otherStores]);
+      storeCodes = ((data ?? []) as { code: string }[]).map((s) => s.code);
+    }
+    return { count: hit.size, storeCodes };
+  },
+
   now: () => Date.now(),
 };
 

@@ -9,6 +9,8 @@
 import { createUploadTicket, verifyUploadTicket } from "./ticket";
 import { adsAutoCrossWarnings } from "./parseAdsAuto";
 import {
+  MARKETPLACE_LABEL,
+  MARKETPLACE_OF,
   TABLES,
   UPLOAD_KINDS,
   checkStoreIdentity,
@@ -60,13 +62,23 @@ export interface UploadDeps {
     start: string,
     end: string,
   ): Promise<{ reportCost: number | null }>;
+  // Hanya untuk TikTok (tt_orders dan tt_income): file TikTok tidak memuat identitas toko, jadi
+  // sampel nomor pesanan dicocokkan dengan toko lain. ID pesanan TikTok unik di seluruh platform,
+  // jadi kalau ada yang sudah tercatat di toko lain, hampir pasti salah memilih toko.
+  ttIdsInOtherStores?(
+    kind: "tt_orders" | "tt_income",
+    storeId: string,
+    ids: string[],
+  ): Promise<{ count: number; storeCodes: string[] }>;
 }
 
 export type HandlerResult = { status: number; json: Record<string, unknown> };
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_RE = /^\d{6,30}$/;
 const MAX_FILE_ROWS = 200000;
+const MAX_ID_SAMPLE = 200;
 
 const fail = (status: number, error: string): HandlerResult => ({
   status,
@@ -104,13 +116,21 @@ export async function handleUpload(
     if (typeof storeId !== "string" || !UUID_RE.test(storeId))
       return fail(400, "Pilih toko dulu.");
 
+    const wantMarket = MARKETPLACE_OF[kind];
+    const wantLabel = MARKETPLACE_LABEL[wantMarket];
     const store = await deps.getStore(storeId);
-    if (
-      !store ||
-      store.marketplace !== "shopee" ||
-      store.managed_by !== admin
-    ) {
-      return fail(403, "Toko ini bukan toko Shopee milikmu.");
+    if (!store || store.managed_by !== admin) {
+      return fail(403, `Toko ini bukan toko ${wantLabel} milikmu.`);
+    }
+    if (store.marketplace !== wantMarket) {
+      const has =
+        store.marketplace === "shopee" || store.marketplace === "tiktok"
+          ? MARKETPLACE_LABEL[store.marketplace]
+          : (store.marketplace ?? "marketplace lain");
+      return fail(
+        403,
+        `Toko ${store.code} adalah toko ${has}, sedangkan file ini untuk ${wantLabel}. Pilih toko ${wantLabel}.`,
+      );
     }
 
     const rowCount = body.rowCount;
@@ -130,6 +150,35 @@ export async function handleUpload(
     });
     if (identity.error) return fail(409, identity.error);
     const warnings = [...identity.warnings];
+
+    // TikTok: sampel nomor pesanan tidak boleh sudah tercatat di toko lain.
+    if (
+      (kind === "tt_orders" || kind === "tt_income") &&
+      deps.ttIdsInOtherStores &&
+      Array.isArray(body.idSample)
+    ) {
+      const ids = (body.idSample as unknown[])
+        .filter((x): x is string => typeof x === "string" && ID_RE.test(x))
+        .slice(0, MAX_ID_SAMPLE);
+      if (ids.length > 0) {
+        try {
+          const o = await deps.ttIdsInOtherStores(kind, store.id, ids);
+          if (o.count > 0) {
+            const where = o.storeCodes.length
+              ? o.storeCodes.join(", ")
+              : "toko lain";
+            return fail(
+              409,
+              `${o.count} dari ${ids.length} nomor pesanan yang diperiksa di file ini sudah tercatat di ${where}, bukan di ${store.code}. Kemungkinan salah memilih toko.`,
+            );
+          }
+        } catch {
+          warnings.push(
+            "Pemeriksaan nomor pesanan terhadap toko lain gagal dijalankan. Pastikan toko yang dipilih benar.",
+          );
+        }
+      }
+    }
 
     // Rincian iklan otomatis: cocokkan dengan file iklan utama periode yang sama.
     if (kind === "ads_auto" && deps.adsAutoCompanion) {

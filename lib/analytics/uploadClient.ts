@@ -6,6 +6,7 @@
 import type { UploadKind } from "./validate";
 
 export const CHUNK_SIZE = 500;
+export const ID_SAMPLE_SIZE = 200;
 
 export type FetchLike = (
   url: string,
@@ -63,6 +64,29 @@ async function post(
   }
 }
 
+// Sampel nomor pesanan yang tersebar merata di seluruh file (bukan hanya 200 baris pertama),
+// supaya server bisa memeriksa apakah nomor itu sudah tercatat di toko TikTok lain.
+export function sampleIds(
+  rows: object[],
+  field: "order_id" | "entry_id",
+  size: number = ID_SAMPLE_SIZE,
+): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const v = (r as Record<string, unknown>)[field];
+    if (typeof v === "string" && /^\d{6,30}$/.test(v) && !seen.has(v)) {
+      seen.add(v);
+      ids.push(v);
+    }
+  }
+  if (ids.length <= size) return ids;
+  const out: string[] = [];
+  const step = ids.length / size;
+  for (let i = 0; i < size; i++) out.push(ids[Math.floor(i * step)]);
+  return out;
+}
+
 export async function checkUpload(
   input: UploadInput,
   storeId: string,
@@ -93,6 +117,11 @@ export async function checkUpload(
   }
   if (input.kind === "ads_auto" && typeof input.parsed.fileTotal === "number") {
     body.fileTotal = input.parsed.fileTotal;
+  }
+  if (input.kind === "tt_orders") {
+    body.idSample = sampleIds(input.parsed.rows, "order_id");
+  } else if (input.kind === "tt_income") {
+    body.idSample = sampleIds(input.parsed.rows, "entry_id");
   }
   const r = await post(fetchFn, body);
   if (r.ok !== true) return { ok: false, error: String(r.error) };

@@ -2,15 +2,25 @@
 // Pembantu tampilan untuk halaman Upload (fungsi murni, mudah diuji).
 import type { FileKind, ReadResult } from "./readFile";
 
-// Urutan tampil dan urutan menyimpan. "ads" harus sebelum "ads_auto": rincian iklan otomatis
-// dicocokkan dengan file iklan utama periode yang sama.
+// Urutan menyimpan. "ads" harus sebelum "ads_auto": rincian iklan otomatis dicocokkan dengan
+// file iklan utama periode yang sama. Jenis TikTok: pesanan, penghasilan, dana, iklan.
 export const KIND_ORDER: FileKind[] = [
   "orders",
   "income",
   "wallet",
   "ads",
   "ads_auto",
+  "tt_orders",
+  "tt_income",
+  "tt_wallet",
+  "tt_ads",
 ];
+
+// Jenis file yang relevan untuk tiap marketplace (dipakai panel "Upload terakhir").
+export const KINDS_OF: Record<"shopee" | "tiktok", FileKind[]> = {
+  shopee: ["orders", "income", "wallet", "ads", "ads_auto"],
+  tiktok: ["tt_orders", "tt_income", "tt_wallet", "tt_ads"],
+};
 
 const nf = (n: number | undefined): string =>
   Math.round(n ?? 0).toLocaleString("id-ID");
@@ -91,6 +101,37 @@ export function summaryOf(r: ReadResult): string[] {
       return [
         `${nf(i.produk)} produk (${nf(i.produk_berbiaya)} yang kena biaya)`,
         `Total biaya ${rp(i.total_biaya)}`,
+      ];
+    }
+    case "tt_orders": {
+      const i = r.parsed.info;
+      return [
+        `${nf(i.pesanan)} pesanan (${nf(i.baris)} baris)`,
+        `${nf(i.dibatalkan)} dibatalkan · ${nf(i.dengan_resi)} baris punya resi`,
+      ];
+    }
+    case "tt_income": {
+      const i = r.parsed.info;
+      const lines = [
+        `${nf(i.pesanan)} pesanan dilepas`,
+        `Dana bersih ${rp(i.dana_bersih)}`,
+      ];
+      if (i.biaya_iklan !== 0)
+        lines.push(`Potongan iklan ${rp(Math.abs(i.biaya_iklan))}`);
+      return lines;
+    }
+    case "tt_wallet": {
+      const i = r.parsed.info;
+      return [
+        `${nf(i.baris)} catatan dana`,
+        `Dana masuk ${rp(i.dana_masuk)} · Penarikan ${rp(Math.abs(i.penarikan))}`,
+      ];
+    }
+    case "tt_ads": {
+      const i = r.parsed.info;
+      return [
+        `${nf(i.hari)} hari (${nf(i.hari_beriklan)} hari beriklan)`,
+        `Total biaya ${rp(i.total_biaya)} · ${nf(i.pesanan_klaim)} pesanan diklaim iklan`,
       ];
     }
   }
