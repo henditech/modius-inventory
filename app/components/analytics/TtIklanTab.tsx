@@ -11,7 +11,13 @@ import {
   roiTxt,
   type Preset,
 } from "@/lib/analytics/ttIklanView";
-import { fmtDate, periodLabel, rp, rpSigned } from "@/lib/analytics/uploadView";
+import {
+  fmtDate,
+  fmtPct,
+  periodLabel,
+  rp,
+  rpSigned,
+} from "@/lib/analytics/uploadView";
 import { Card, Stat } from "./ui";
 
 type StoreOpt = { id: string; code: string; name: string };
@@ -126,6 +132,19 @@ export default function TtIklanTab({ currentUser }: { currentUser: string }) {
     [full],
   );
   const idleCost = idle.reduce((a, d) => a + d.cost, 0);
+
+  // Rincian per kampanye (dari file Product campaign). Kampanye tanpa biaya di rentang ini
+  // tidak masuk tabel, hanya disebut namanya. "Perlu dicek" = ada biaya tapi tidak ada pesanan
+  // yang diklaim iklan, atau ROI klaim iklan di bawah 1.
+  const camps = full?.campaigns ?? [];
+  const activeCamps = camps.filter((c) => c.cost > 0);
+  const quietCamps = camps.filter((c) => c.cost === 0);
+  const campCost = activeCamps.reduce((a, c) => a + c.cost, 0);
+  const weakCamps = activeCamps.filter(
+    (c) => c.skuOrders === 0 || (c.roi ?? 0) < 1,
+  );
+  const weakCost = weakCamps.reduce((a, c) => a + c.cost, 0);
+  const weakOrders = weakCamps.reduce((a, c) => a + c.skuOrders, 0);
 
   if (sessionExpired) {
     return (
@@ -243,8 +262,8 @@ export default function TtIklanTab({ currentUser }: { currentUser: string }) {
               start: full.coverage.adsFirst,
               end: full.coverage.adsLast,
             })}
-            . Rentang dihitung dari <b>tanggal iklan</b> (file Campaign
-            overview), bukan tanggal dana dilepas.
+            . Rentang dihitung dari <b>tanggal iklan</b> (file Product campaign
+            atau Campaign overview), bukan tanggal dana dilepas.
           </p>
         )}
       </div>
@@ -265,7 +284,7 @@ export default function TtIklanTab({ currentUser }: { currentUser: string }) {
         ) : null
       ) : data.empty ? (
         <div className="bg-panel border border-line rounded-xl p-5 text-sm text-neutral-400">
-          Belum ada data iklan untuk toko ini. Upload file Campaign overview
+          Belum ada data iklan untuk toko ini. Upload file Product campaign
           TikTok di tab Upload.
         </div>
       ) : (
@@ -340,6 +359,104 @@ export default function TtIklanTab({ currentUser }: { currentUser: string }) {
               </ul>
             </Card>
 
+            {activeCamps.length > 0 && (
+              <Card
+                title="Iklan per kampanye"
+                subtitle="Dari file Product campaign. TikTok hanya memberi biaya sampai tingkat kampanye, bukan per produk."
+              >
+                {weakCamps.length > 0 && campCost > 0 && (
+                  <p className="text-sm text-amber-300 mb-3 leading-relaxed">
+                    {weakCamps.length} dari {activeCamps.length} kampanye
+                    berbiaya perlu dicek (tanpa pesanan atau ROI di bawah 1):{" "}
+                    {weakCamps.map((c) => c.name).join(", ")}. Biayanya{" "}
+                    {rp(weakCost)} ({fmtPct((weakCost / campCost) * 100)} dari
+                    biaya kampanye) dengan {weakOrders} pesanan diklaim iklan.
+                  </p>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm tabular-nums">
+                    <thead>
+                      <tr className="border-b border-line">
+                        <Th label="Kampanye" right={false} />
+                        <Th label="Hari aktif" />
+                        <Th label="Biaya" />
+                        <Th label="Porsi biaya" />
+                        <Th label="Pesanan" />
+                        <Th label="Biaya per pesanan" />
+                        <Th label="Penghasilan bruto" />
+                        <Th label="ROI" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeCamps.map((c) => {
+                        const tone =
+                          c.skuOrders === 0
+                            ? "text-red-300"
+                            : (c.roi ?? 0) < 1
+                              ? "text-amber-300"
+                              : "text-neutral-300";
+                        return (
+                          <tr
+                            key={c.id}
+                            className={`border-b border-white/5 ${tone}`}
+                          >
+                            <td className="py-2 px-3">{c.name}</td>
+                            <td className="py-2 px-3 text-right">
+                              {c.activeDays}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {rp(c.cost)}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {campCost > 0
+                                ? fmtPct((c.cost / campCost) * 100)
+                                : "–"}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {c.skuOrders}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {c.costPerOrder == null
+                                ? "–"
+                                : rp(c.costPerOrder)}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {rp(c.grossRevenue)}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {roiTxt(c.roi)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {quietCamps.length > 0 && (
+                  <p className="text-[11px] text-neutral-500 mt-3">
+                    Tanpa biaya di rentang ini:{" "}
+                    {quietCamps.map((c) => c.name).join(", ")}.
+                  </p>
+                )}
+                <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+                  Merah = ada biaya tapi tidak ada pesanan yang diklaim iklan.
+                  Kuning = ROI di bawah 1. ROI di sini adalah penghasilan bruto
+                  ÷ biaya iklan (klaim iklan), belum dikurangi modal barang dan
+                  potongan platform, jadi ROI di atas 1 belum tentu untung.
+                  Kampanye dengan sedikit hari atau sedikit pesanan belum cukup
+                  untuk disimpulkan.
+                </p>
+              </Card>
+            )}
+            {full.campaigns &&
+              full.campaigns.length === 0 &&
+              full.summary.cost > 0 && (
+                <p className="text-xs text-neutral-500">
+                  Belum ada rincian per kampanye untuk rentang ini. Upload file
+                  Product campaign di tab Upload untuk melihatnya.
+                </p>
+              )}
+
             {cmp && full.summary.cost > 0 && (
               <Card
                 title="Iklan vs uang yang benar-benar masuk"
@@ -350,7 +467,7 @@ export default function TtIklanTab({ currentUser }: { currentUser: string }) {
                     <tbody>
                       <tr className="border-b border-white/5">
                         <td className="py-2 px-3 text-neutral-300">
-                          Biaya iklan (Campaign overview)
+                          Biaya iklan (data iklan TikTok)
                         </td>
                         <td className="py-2 px-3 text-right">
                           {rp(full.summary.cost)}

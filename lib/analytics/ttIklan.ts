@@ -1,6 +1,7 @@
 // lib/analytics/ttIklan.ts
 // Penangan tab Iklan TikTok: validasi masukan, cek kepemilikan toko, lalu menyusun angka dari
-// fungsi SQL (13_tiktok_iklan.sql, 12_tiktok_penghasilan.sql) dan tabel analytics.tt_ads_daily.
+// fungsi SQL (13_tiktok_iklan.sql, 12_tiktok_penghasilan.sql, 18_tiktok_iklan_kampanye.sql) dan
+// tabel analytics.tt_ads_daily.
 // File ini tidak menyentuh Supabase langsung; route.ts yang menyuntikkan akses datanya
 // (pola yang sama dengan ttPenghasilan.ts).
 
@@ -20,6 +21,8 @@ export type TtIklanDeps = {
   summary(storeId: string, from: string, to: string): Promise<RpcResult>;
   daily(storeId: string, from: string, to: string): Promise<RpcResult>;
   income(storeId: string, from: string, to: string): Promise<RpcResult>;
+  // Rincian per kampanye (tt_ads_by_campaign). Boleh tidak diisi: tab tetap jalan tanpa rincian.
+  campaigns?(storeId: string, from: string, to: string): Promise<RpcResult>;
 };
 
 // Batas baris tabel harian. Kalau terlampaui, pengguna diberi tahu (tidak diam-diam terpotong).
@@ -31,6 +34,18 @@ export type TtIklanDay = {
   skuOrders: number;
   grossRevenue: number;
   roi: number | null; // dihitung dari bruto / biaya; kosong kalau tidak ada biaya
+};
+
+// Satu kampanye dalam rentang. Angka pesanan dan bruto adalah klaim iklan (batas atas).
+export type TtIklanCampaign = {
+  id: string;
+  name: string;
+  activeDays: number; // hari dengan biaya > 0
+  cost: number;
+  skuOrders: number;
+  grossRevenue: number;
+  roi: number | null; // bruto / biaya; kosong kalau tidak ada biaya
+  costPerOrder: number | null; // kosong kalau tidak ada pesanan
 };
 
 export type TtIklanCompare = {
@@ -58,6 +73,8 @@ export type TtIklanData = {
     costPerOrder: number | null;
   };
   daily: TtIklanDay[];
+  // undefined = rincian per kampanye tidak dimuat; [] = belum ada data kampanye di rentang ini.
+  campaigns?: TtIklanCampaign[];
   compare: TtIklanCompare | null;
   warnings: string[];
 };
@@ -86,6 +103,8 @@ const validDate = (s: string): boolean =>
   ISO.test(s) && !Number.isNaN(Date.parse(s));
 const inclusiveDays = (a: string, b: string): number =>
   Math.round((Date.parse(b) - Date.parse(a)) / 86400000) + 1;
+const rupiah = (n: number): string =>
+  `Rp${Math.round(n).toLocaleString("id-ID")}`;
 
 export async function handleTtIklan(
   deps: TtIklanDeps,
@@ -140,10 +159,13 @@ export async function handleTtIklan(
     };
   }
 
-  const [sum, daily, inc] = await Promise.all([
+  const [sum, daily, inc, camp] = await Promise.all([
     deps.summary(store.id, from, to),
     deps.daily(store.id, from, to),
     deps.income(store.id, from, to),
+    deps.campaigns
+      ? deps.campaigns(store.id, from, to)
+      : Promise.resolve<RpcResult | null>(null),
   ]);
   const s = firstRow(sum.data);
   if (sum.error || !s || daily.error) {
@@ -178,6 +200,24 @@ export async function handleTtIklan(
       }
     : null;
 
+  // Rincian per kampanye juga tambahan: kalau gagal dimuat, halaman tetap tampil dan pengguna
+  // diberi tahu lewat peringatan (tidak diam-diam hilang).
+  let campaigns: TtIklanCampaign[] | undefined;
+  if (camp && !camp.error) {
+    campaigns = (Array.isArray(camp.data) ? camp.data : []).map(
+      (r: Record<string, unknown>) => ({
+        id: String(r.campaign_id),
+        name: String(r.campaign_name ?? r.campaign_id),
+        activeDays: num(r.active_days),
+        cost: num(r.cost),
+        skuOrders: num(r.sku_orders),
+        grossRevenue: num(r.gross_revenue),
+        roi: numOrNull(r.roi),
+        costPerOrder: numOrNull(r.cost_per_order),
+      }),
+    );
+  }
+
   const days = num(s.days);
   const warnings: string[] = [];
   const rangeDays = inclusiveDays(from, to);
@@ -192,6 +232,20 @@ export async function handleTtIklan(
     warnings.push(
       `Tabel harian dipotong di ${TT_IKLAN_DAILY_LIMIT} hari. Angka ringkasan tetap dihitung dari semua hari.`,
     );
+  }
+  if (camp?.error) {
+    warnings.push(
+      "Rincian per kampanye gagal dimuat. Angka lainnya tetap benar.",
+    );
+  }
+  if (campaigns && campaigns.length > 0) {
+    const campCost = campaigns.reduce((a, x) => a + x.cost, 0);
+    const total = num(s.cost);
+    if (Math.abs(campCost - total) > 1) {
+      warnings.push(
+        `Rincian per kampanye (${rupiah(campCost)}) tidak sama dengan total biaya iklan (${rupiah(total)}). Sebagian hari di rentang ini hanya ada dari file Campaign overview, belum dari Product campaign.`,
+      );
+    }
   }
 
   return {
@@ -212,6 +266,7 @@ export async function handleTtIklan(
         costPerOrder: numOrNull(s.cost_per_order),
       },
       daily: dailyRows,
+      campaigns,
       compare,
       warnings,
     },

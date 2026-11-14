@@ -3,7 +3,9 @@
 import type { FileKind, ReadResult } from "./readFile";
 
 // Urutan menyimpan. "ads" harus sebelum "ads_auto": rincian iklan otomatis dicocokkan dengan
-// file iklan utama periode yang sama. Jenis TikTok: pesanan, penghasilan, dana, iklan.
+// file iklan utama periode yang sama. Jenis TikTok: pesanan, penghasilan, dana, iklan. Iklan per
+// kampanye disimpan SESUDAH iklan harian, jadi kalau dua-duanya diupload, angka harian dari
+// Product campaign yang dipakai.
 export const KIND_ORDER: FileKind[] = [
   "orders",
   "income",
@@ -14,12 +16,13 @@ export const KIND_ORDER: FileKind[] = [
   "tt_income",
   "tt_wallet",
   "tt_ads",
+  "tt_ads_campaign",
 ];
 
 // Jenis file yang relevan untuk tiap marketplace (dipakai panel "Upload terakhir").
 export const KINDS_OF: Record<"shopee" | "tiktok", FileKind[]> = {
   shopee: ["orders", "income", "wallet", "ads", "ads_auto"],
-  tiktok: ["tt_orders", "tt_income", "tt_wallet", "tt_ads"],
+  tiktok: ["tt_orders", "tt_income", "tt_wallet", "tt_ads_campaign"],
 };
 
 const nf = (n: number | undefined): string =>
@@ -131,6 +134,13 @@ export function summaryOf(r: ReadResult): string[] {
       const i = r.parsed.info;
       return [
         `${nf(i.hari)} hari (${nf(i.hari_beriklan)} hari beriklan)`,
+        `Total biaya ${rp(i.total_biaya)} · ${nf(i.pesanan_klaim)} pesanan diklaim iklan`,
+      ];
+    }
+    case "tt_ads_campaign": {
+      const i = r.parsed.info;
+      return [
+        `${nf(i.kampanye)} kampanye · ${nf(i.hari)} hari (${nf(i.hari_beriklan)} hari beriklan)`,
         `Total biaya ${rp(i.total_biaya)} · ${nf(i.pesanan_klaim)} pesanan diklaim iklan`,
       ];
     }

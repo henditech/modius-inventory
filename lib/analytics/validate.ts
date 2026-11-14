@@ -12,7 +12,8 @@ export type UploadKind =
   | "tt_orders"
   | "tt_income"
   | "tt_wallet"
-  | "tt_ads";
+  | "tt_ads"
+  | "tt_ads_campaign";
 export const UPLOAD_KINDS: UploadKind[] = [
   "orders",
   "income",
@@ -23,6 +24,7 @@ export const UPLOAD_KINDS: UploadKind[] = [
   "tt_income",
   "tt_wallet",
   "tt_ads",
+  "tt_ads_campaign",
 ];
 export const MAX_ROWS_PER_REQUEST = 1000;
 
@@ -38,6 +40,7 @@ export const MARKETPLACE_OF: Record<UploadKind, Marketplace> = {
   tt_income: "tiktok",
   tt_wallet: "tiktok",
   tt_ads: "tiktok",
+  tt_ads_campaign: "tiktok",
 };
 export const MARKETPLACE_LABEL: Record<Marketplace, string> = {
   shopee: "Shopee",
@@ -302,6 +305,28 @@ export const TABLES: Record<UploadKind, TableConfig> = {
       ...opt("num", "roi"),
     ],
   },
+  // 18_tiktok_iklan_kampanye.sql. Mengisi tt_ads_daily dilakukan database (19_tiktok_iklan_sinkron.sql).
+  tt_ads_campaign: {
+    table: "tt_ads_campaign_daily",
+    onConflict: "store_id,campaign_id,day",
+    key: ["campaign_id", "day"],
+    spec: [
+      ...req("text", "campaign_id", "campaign_name"),
+      ...req("date", "day"),
+      ...req(
+        "num",
+        "cost",
+        "net_cost",
+        "affiliate_cost",
+        "gross_revenue",
+        "voucher_cost",
+        "voucher_revenue",
+      ),
+      ...req("int", "sku_orders"),
+      ...opt("num", "roi", "daily_budget"),
+      ...opt("text", "roi_protection"),
+    ],
+  },
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -430,7 +455,7 @@ export function checkStoreIdentity(
     return { warnings };
   }
 
-  // File TikTok (pesanan, income, Campaign overview) tidak memuat identitas toko sama sekali.
+  // File TikTok (pesanan, income, Campaign overview, Product campaign) tidak memuat identitas toko sama sekali.
   if (MARKETPLACE_OF[kind] === "tiktok") {
     warnings.push(
       "File TikTok tidak memuat identitas toko, jadi tidak bisa dicek otomatis. Pastikan toko yang dipilih benar.",

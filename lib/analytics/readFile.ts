@@ -24,11 +24,13 @@ import {
 import {
   detectTtFile,
   parseTtAds,
+  parseTtAdsCampaign,
   parseTtIncome,
   parseTtOrders,
   type TtIncomeRow,
   type TtOrderRow,
   type TtAdsRow,
+  type TtAdsCampaignRow,
   type TtWalletRow,
 } from "./parseTikTok";
 
@@ -41,7 +43,8 @@ export type FileKind =
   | "tt_orders"
   | "tt_income"
   | "tt_wallet"
-  | "tt_ads";
+  | "tt_ads"
+  | "tt_ads_campaign";
 
 export type ReadResult =
   | { kind: "orders"; fileName: string; parsed: ParsedFile<OrderRow> }
@@ -63,7 +66,12 @@ export type ReadResult =
   | { kind: "tt_orders"; fileName: string; parsed: ParsedFile<TtOrderRow> }
   | { kind: "tt_income"; fileName: string; parsed: ParsedFile<TtIncomeRow> }
   | { kind: "tt_wallet"; fileName: string; parsed: ParsedFile<TtWalletRow> }
-  | { kind: "tt_ads"; fileName: string; parsed: ParsedFile<TtAdsRow> };
+  | { kind: "tt_ads"; fileName: string; parsed: ParsedFile<TtAdsRow> }
+  | {
+      kind: "tt_ads_campaign";
+      fileName: string;
+      parsed: ParsedFile<TtAdsCampaignRow>;
+    };
 
 export const KIND_LABEL: Record<FileKind, string> = {
   orders: "Pesanan",
@@ -75,6 +83,7 @@ export const KIND_LABEL: Record<FileKind, string> = {
   tt_income: "Penghasilan TikTok",
   tt_wallet: "Dana TikTok",
   tt_ads: "Iklan TikTok (harian)",
+  tt_ads_campaign: "Iklan TikTok (per kampanye)",
 };
 
 // File TikTok Shop (dibuat WPS) sering mencatat ukuran sheet salah: "A1" untuk pesanan dan
@@ -156,6 +165,15 @@ export async function readUploadFile(file: File): Promise<ReadResult[]> {
   if (tt === "tt_ads") {
     return [{ kind: "tt_ads", fileName, parsed: parseTtAds(first) }];
   }
+  if (tt === "tt_ads_campaign") {
+    return [
+      {
+        kind: "tt_ads_campaign",
+        fileName,
+        parsed: parseTtAdsCampaign(first),
+      },
+    ];
+  }
 
   // Penghasilan Shopee: punya sheet "Penghasilan" (+ "Summary" untuk identitas toko dan pencocokan total)
   if (wb.SheetNames.includes("Penghasilan")) {
@@ -185,7 +203,7 @@ export async function readUploadFile(file: File): Promise<ReadResult[]> {
       e.message.startsWith("Ini bukan file pesanan Shopee")
     ) {
       throw new ParseError(
-        "File ini tidak dikenali. Yang bisa dibaca: Shopee (Pesanan, Income sudah dilepas, Saldo, Iklan, Rincian Iklan Produk Otomatis) dan TikTok Shop (Semua pesanan, income, Campaign overview). File TikTok Shop lain seperti traffic, live, dan promosi belum didukung.",
+        "File ini tidak dikenali. Yang bisa dibaca: Shopee (Pesanan, Income sudah dilepas, Saldo, Iklan, Rincian Iklan Produk Otomatis) dan TikTok Shop (Semua pesanan, income, Campaign overview, Product campaign). File TikTok Shop lain seperti traffic, live, dan promosi belum didukung.",
       );
     }
     throw e;

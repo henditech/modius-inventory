@@ -436,8 +436,8 @@ export default function UploadTab({ currentUser }: { currentUser: string }) {
           <p className="text-xs text-neutral-500 mt-1">
             Shopee: Pesanan, Penghasilan (Income sudah dilepas), Saldo, Iklan,
             dan Rincian Iklan Produk Otomatis. TikTok Shop: Semua pesanan,
-            income, dan Campaign overview. Jenisnya dikenali otomatis. Boleh
-            beberapa file sekaligus.
+            income, dan Product campaign (laporan iklan per kampanye). Jenisnya
+            dikenali otomatis. Boleh beberapa file sekaligus.
           </p>
           <input
             ref={inputRef}

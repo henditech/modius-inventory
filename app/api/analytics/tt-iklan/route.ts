@@ -52,6 +52,9 @@ const deps: TtIklanDeps = {
   // Dipakai untuk membandingkan biaya iklan dengan dana yang benar-benar masuk.
   income: (storeId, from, to) =>
     rpc("tt_income_summary", { p_store: storeId, p_from: from, p_to: to }),
+  // Rincian per kampanye (18_tiktok_iklan_kampanye.sql). Satu baris per kampanye.
+  campaigns: (storeId, from, to) =>
+    rpc("tt_ads_by_campaign", { p_store: storeId, p_from: from, p_to: to }),
 };
 
 export async function GET(req: Request) {

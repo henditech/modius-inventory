@@ -12,6 +12,7 @@ import TtPenghasilanTab from "./TtPenghasilanTab";
 import TtIklanTab from "./TtIklanTab";
 import TtPesananTab from "./TtPesananTab";
 import TtSaldoTab from "./TtSaldoTab";
+import TtPanelTab from "./TtPanelTab";
 import { useDana } from "./useDana";
 
 type Market = "shopee" | "tiktok";
@@ -37,6 +38,7 @@ const TIKTOK_TABS = [
   { id: "tt_iklan", label: "Iklan" },
   { id: "tt_pesanan", label: "Pesanan" },
   { id: "tt_saldo", label: "Saldo" },
+  { id: "tt_panel", label: "Panel" },
 ] as const;
 type TabId =
   | (typeof SHOPEE_TABS)[number]["id"]
@@ -141,6 +143,9 @@ export default function AnalyticsSection({
       )}
       {market === "tiktok" && tab === "tt_saldo" && (
         <TtSaldoTab currentUser={currentUser} />
+      )}
+      {market === "tiktok" && tab === "tt_panel" && (
+        <TtPanelTab currentUser={currentUser} />
       )}
     </div>
   );

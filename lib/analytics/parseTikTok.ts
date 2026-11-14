@@ -1,5 +1,5 @@
 // lib/analytics/parseTikTok.ts
-// Pembaca file TikTok Shop: Semua pesanan, income, dan Campaign overview. Fungsi murni tanpa
+// Pembaca file TikTok Shop: Semua pesanan, income, Campaign overview, dan Product campaign. Fungsi murni tanpa
 // dependensi (pola sama dengan parse.ts): menerima baris mentah (array 2 dimensi) dan
 // mengembalikan baris bersih yang siap diunggah. Dijalankan DI BROWSER sebelum apa pun dikirim.
 //
@@ -14,6 +14,8 @@
 //     (total periode), "Riwayat penarikan" (dana harian, penarikan, potongan iklan). Hampir semua
 //     sel berupa teks; tanggal "yyyy/mm/dd". Periode berdasarkan tanggal pembayaran.
 //   - Campaign overview: baris data per hari + satu baris total di akhir (kolom tanggal "-").
+//   - Product campaign: satu baris per KAMPANYE per hari (bukan per produk), kolom ID Campaign dan
+//     Nama kampanye. Jumlah per hari sama persis dengan Campaign overview. Tidak ada baris total.
 //   - Beberapa file TikTok mencatat ukuran sheet salah ("A1"). Pembaca file (readFile.ts) harus
 //     menghitung ulang rentang sheet dari sel yang ada sebelum memanggil fungsi di sini.
 import { ParseError, type ParsedFile, type Period, type Rows } from "./parse";
@@ -829,12 +831,146 @@ export function parseTtAds(rows: Rows): ParsedFile<TtAdsRow> {
   };
 }
 
+// ---------------------------------------------------------------- IKLAN PER KAMPANYE (Product campaign)
+
+// Satu baris = satu kampanye pada satu hari. Biaya iklan TikTok hanya sampai tingkat kampanye,
+// TIDAK ada ID produk. affiliate_cost disimpan apa adanya dari kolom "Biaya (afiliasi)": nilainya
+// bisa lebih besar dari biaya kampanye pada hari yang sama, jadi bukan bagian dari biaya iklan
+// dan belum dipakai di perhitungan mana pun.
+export type TtAdsCampaignRow = {
+  campaign_id: string;
+  campaign_name: string;
+  day: string;
+  cost: number;
+  net_cost: number;
+  affiliate_cost: number;
+  sku_orders: number;
+  gross_revenue: number;
+  roi: number | null;
+  daily_budget: number | null;
+  roi_protection: string | null;
+  voucher_cost: number;
+  voucher_revenue: number;
+};
+
+export function parseTtAdsCampaign(rows: Rows): ParsedFile<TtAdsCampaignRow> {
+  const h = findHeaderRow(rows, ["ID Campaign", "Per Hari", "Biaya"]);
+  if (h < 0) {
+    throw new ParseError(
+      "Ini bukan file 'Product campaign' TikTok Shop: kolom 'ID Campaign', 'Per Hari' dan 'Biaya' tidak ditemukan.",
+    );
+  }
+  const idx = headerIndex(rows[h]);
+  const idCol = idx.get("ID Campaign") as number;
+  const dayCol = idx.get("Per Hari") as number;
+  const costCol = idx.get("Biaya") as number;
+  const nameCol = idx.get("Nama kampanye");
+  const ordersCol = idx.get("Pesanan SKU");
+  const grossCol = idx.get("Pendapatan kotor");
+  if (nameCol == null || ordersCol == null || grossCol == null) {
+    throw new ParseError(
+      "Kolom 'Nama kampanye', 'Pesanan SKU' atau 'Pendapatan kotor' tidak ditemukan di file Product campaign.",
+    );
+  }
+  const netCol = idx.get("Biaya Bersih");
+  const affCol = idx.get("Biaya (afiliasi)");
+  const roiCol = idx.get("ROI");
+  const budgetCol = idx.get("Anggaran harian");
+  const protCol = idx.get("Perlindungan ROI");
+  const vCostCol = idx.get("Biaya voucher");
+  const vRevCol = idx.get("Pendapatan dari voucher");
+  const cur = idx.get("Mata uang");
+
+  const out: TtAdsCampaignRow[] = [];
+  const seen = new Set<string>();
+  let badRows = 0;
+  let duplicates = 0;
+  let notIdr = 0;
+
+  for (let i = h + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const rawDay = str(r[dayCol]);
+    if (rawDay === "" || rawDay === "-" || /^total$/i.test(rawDay)) continue;
+    const day = dayOf(r[dayCol]);
+    const cost = num(r[costCol]);
+    const campaignId = idText(r[idCol], "ID Campaign");
+    if (!day || cost == null || campaignId === "") {
+      badRows++;
+      continue;
+    }
+    if (cur != null && str(r[cur]) !== "" && str(r[cur]) !== "IDR") notIdr++;
+    const key = `${campaignId}|${day}`;
+    if (seen.has(key)) {
+      duplicates++;
+      continue;
+    }
+    seen.add(key);
+    out.push({
+      campaign_id: campaignId,
+      campaign_name: str(r[nameCol]) || campaignId,
+      day,
+      cost,
+      net_cost: netCol == null ? cost : (num(r[netCol]) ?? cost),
+      affiliate_cost: affCol == null ? 0 : (num(r[affCol]) ?? 0),
+      sku_orders: int(num(r[ordersCol])) ?? 0,
+      gross_revenue: num(r[grossCol]) ?? 0,
+      roi: roiCol == null ? null : num(r[roiCol]),
+      daily_budget: budgetCol == null ? null : num(r[budgetCol]),
+      roi_protection:
+        protCol == null
+          ? null
+          : str(r[protCol]) === ""
+            ? null
+            : str(r[protCol]),
+      voucher_cost: vCostCol == null ? 0 : (num(r[vCostCol]) ?? 0),
+      voucher_revenue: vRevCol == null ? 0 : (num(r[vRevCol]) ?? 0),
+    });
+  }
+
+  if (badRows > 0)
+    throw new ParseError(
+      `${badRows} baris di file Product campaign tidak punya tanggal, ID kampanye, atau biaya yang valid.`,
+    );
+  if (notIdr > 0)
+    throw new ParseError(
+      `${notIdr} baris di file Product campaign memakai mata uang selain IDR.`,
+    );
+  if (out.length === 0)
+    throw new ParseError("File Product campaign ini tidak berisi baris data.");
+
+  const warnings: string[] = [];
+  if (duplicates > 0)
+    warnings.push(
+      `${duplicates} baris dengan kampanye dan tanggal kembar dilewati.`,
+    );
+  const totalCost = out.reduce((a, o) => a + o.cost, 0);
+  if (totalCost === 0)
+    warnings.push("Tidak ada biaya iklan sama sekali di file ini.");
+
+  const days = new Set(out.map((o) => o.day));
+  const costDays = new Set(out.filter((o) => o.cost > 0).map((o) => o.day));
+  return {
+    rows: out,
+    store: {}, // file ini tidak memuat identitas toko
+    period: minMax(out.map((o) => o.day)),
+    warnings,
+    info: {
+      hari: days.size,
+      kampanye: new Set(out.map((o) => o.campaign_id)).size,
+      hari_beriklan: costDays.size,
+      total_biaya: Math.round(totalCost),
+      pesanan_klaim: out.reduce((a, o) => a + o.sku_orders, 0),
+    },
+  };
+}
+
 // ---------------------------------------------------------------- PENGENALAN JENIS FILE
 
 export type TtFileKind =
   | "tt_orders"
   | "tt_income"
   | "tt_ads"
+  | "tt_ads_campaign"
   | "tt_profit_loss"; // dikenali tetapi tidak dipakai
 
 // Dipanggil dengan nama sheet dan baris sheet pertama. null = bukan file TikTok yang dikenal
@@ -854,6 +990,8 @@ export function detectTtFile(
       return names.every((n) => s.has(n));
     });
   if (hasCells("Order ID", "Order Status")) return "tt_orders";
+  // Product campaign juga punya kolom "Per Hari" dan "Biaya", jadi harus dicek LEBIH DULU.
+  if (hasCells("ID Campaign", "Per Hari")) return "tt_ads_campaign";
   if (hasCells("Per Hari", "Biaya")) return "tt_ads";
   return null;
 }
